@@ -1,0 +1,18 @@
+.env
+venv/
+__pycache__/
+*.pyc
+*.nc
+# ** matches at any depth -- each project (maria_island/, rock_lobster/)
+# has its own data/raw and data/clean, not just one at repo root.
+**/data/raw/*.csv
+**/data/clean/*.csv
+!**/data/raw/_test_fixture.html
+
+# Loose large downloads not yet organized into data/raw|clean (e.g. RLS export)
+maria_island/*.csv
+
+.DS_Store
+
+# Local-machine tool permission config, not meant for a shared repo
+.claude/settings.local.json
