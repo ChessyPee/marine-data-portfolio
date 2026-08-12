@@ -27,7 +27,7 @@ JOIN qa_season_totals_published q USING (quota_year)
 GROUP BY f.quota_year, q.catch_tonnes_published
 HAVING ABS(SUM(f.catch_tonnes) - q.catch_tonnes_published) > 0.5;
 
--- 4. Rows flagged during cleaning (typos, over-quota months, % mismatches)
+-- 4. Rows flagged during cleaning (typos, over-quota months, percent mismatches)
 --    -- review these manually before presenting the numbers.
 SELECT quota_year, month_date, catch_tonnes, uncaught_tonnes,
        flag_over_quota, flag_pct_mismatch, any_flag

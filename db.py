@@ -37,4 +37,8 @@ def run_sql_file(engine, path):
         for statement in sql.split(";"):
             statement = statement.strip()
             if statement:
-                conn.exec_driver_sql(statement)
+                # psycopg2's cursor.execute() treats a bare "%" as a
+                # pyformat parameter marker even inside a SQL comment --
+                # escape to "%%" so a literal "%" in a comment (e.g. "50%
+                # of rows...") doesn't crash with "dict is not a sequence".
+                conn.exec_driver_sql(statement.replace("%", "%%"))

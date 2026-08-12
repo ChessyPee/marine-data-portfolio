@@ -39,7 +39,7 @@ CREATE TABLE qa_season_totals_published (
     catch_tonnes_published    NUMERIC(10,2)
 );
 
--- Dashboard-facing view: season-to-date cumulative catch and % of TAC taken,
+-- Dashboard-facing view: season-to-date cumulative catch and percent of TAC taken,
 -- computed with a window function (running total per quota year).
 CREATE OR REPLACE VIEW vw_season_progress AS
 SELECT
