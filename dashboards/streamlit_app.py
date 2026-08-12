@@ -44,11 +44,16 @@ def load_data():
         "SELECT * FROM vw_warm_spell_groups ORDER BY spell_start", engine,
         parse_dates=["spell_start", "spell_end"],
     )
-    return monthly, spells
+    coverage = pd.read_sql(
+        "SELECT COUNT(*) AS n_months, MIN(month_date) AS earliest, MAX(month_date) AS latest "
+        "FROM fact_maria_island_temp",
+        engine,
+    ).iloc[0]
+    return monthly, spells, coverage
 
 
 try:
-    monthly, spells = load_data()
+    monthly, spells, coverage = load_data()
 except Exception as e:
     st.error(
         "Couldn't reach the database. Check that DATABASE_URL / DB_* are set "
@@ -56,6 +61,14 @@ except Exception as e:
     )
     st.exception(e)
     st.stop()
+
+st.caption(
+    f"Analysis built from **{coverage['n_months']:,} monthly observations**, "
+    f"{coverage['earliest']:%b %Y} to {coverage['latest']:%b %Y}. "
+    "Source: IMOS/AODN long-term Temperature and Salinity product, National Reference "
+    "Station Maria Island, downloaded via the "
+    "[Australian Ocean Data Network Portal](https://portal.aodn.org.au/)."
+)
 
 col1, col2, col3 = st.columns(3)
 latest = monthly.iloc[-1]
@@ -91,4 +104,15 @@ st.caption(
     "Note: 'warm month' here means above that calendar month's 90th-percentile "
     "temperature across the full record -- a simplified monthly stand-in for the "
     "formal daily marine heatwave definition (Hobday et al. 2016), not a replacement for it."
+)
+
+st.divider()
+st.caption(
+    f"**Data**: {coverage['n_months']:,} monthly observations, "
+    f"{coverage['earliest']:%Y-%m} to {coverage['latest']:%Y-%m}. "
+    "**Source**: IMOS Australian National Mooring Network (ANMN) Facility, long-term "
+    "Temperature and Salinity product, National Reference Station Maria Island (NRSMAI). "
+    "Downloaded from the [AODN Portal](https://portal.aodn.org.au/) "
+    "(portal.aodn.org.au). Data provided by IMOS, a national collaborative research "
+    "infrastructure supported by the Australian Government."
 )

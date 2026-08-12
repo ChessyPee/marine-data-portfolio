@@ -62,7 +62,21 @@ MIN_TEMP_C, MAX_TEMP_C = 0, 30
 MIN_PSAL, MAX_PSAL = 0, 40
 
 
+def check_columns():
+    """Fail fast and loud, with a clear message, if AODN's export format
+    ever changes -- rather than pandas' own usecols error further down,
+    or (worse) a load that silently produces fewer rows than expected."""
+    header = pd.read_csv(RAW_PATH, skiprows=HEADER_ROW, nrows=0)
+    missing = [c for c in KEEP_COLUMNS if c not in header.columns]
+    if missing:
+        raise ValueError(
+            "Raw CSV is missing expected column(s) -- AODN's export format may "
+            f"have changed. Refusing to clean. Missing: {missing}"
+        )
+
+
 def main():
+    check_columns()
     raw = pd.read_csv(RAW_PATH, skiprows=HEADER_ROW, usecols=list(KEEP_COLUMNS))
     raw = raw.rename(columns=KEEP_COLUMNS)
     n_before = len(raw)

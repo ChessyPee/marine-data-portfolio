@@ -12,6 +12,7 @@ Requires:
 """
 
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pandas as pd
@@ -19,15 +20,21 @@ import pandas as pd
 sys.path.append(str(Path(__file__).parent.parent))
 from db import get_engine, run_sql_file  # noqa: E402
 
+RAW_PATH = Path(__file__).parent / "data" / "raw" / "mooring_hires_raw.csv"
 CLEAN_PATH = Path(__file__).parent / "data" / "clean" / "mooring_hires_clean.csv"
 SCHEMA_PATH = Path(__file__).parent / "schema_hires.sql"
+HEADER_OFFSET = 23  # metadata block + header line, to count only data rows
 
 
 def main():
+    started_at = datetime.now(timezone.utc)
     engine = get_engine()
 
     print("Creating schema...")
     run_sql_file(engine, SCHEMA_PATH)
+
+    with open(RAW_PATH, encoding="utf-8") as f:
+        rows_source = sum(1 for _ in f) - HEADER_OFFSET
 
     clean = pd.read_csv(CLEAN_PATH, parse_dates=["timestamp"])
 
@@ -53,7 +60,20 @@ def main():
     ]
     clean[cols].to_sql("fact_sensor_reading", engine, if_exists="append", index=False)
     print(f"Loaded {len(clean)} row(s) into fact_sensor_reading")
-    print("Done. Run verify_hires.sql next.")
+
+    log_row = pd.DataFrame([{
+        "pipeline": "python",
+        "source_file": "mooring_hires_raw.csv",
+        "rows_source": rows_source,
+        "rows_loaded": len(clean),
+        "rows_rejected": rows_source - len(clean),
+        "started_at": started_at,
+        "finished_at": datetime.now(timezone.utc),
+        "notes": "clean_hires.py + load_hires.py full run",
+    }])
+    log_row.to_sql("etl_load_log", engine, if_exists="append", index=False)
+    print("Logged this run to etl_load_log.")
+    print("Done. Run verify_hires.sql (or validate_hires.py) next.")
 
 
 if __name__ == "__main__":

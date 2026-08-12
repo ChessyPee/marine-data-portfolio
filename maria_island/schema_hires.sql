@@ -137,3 +137,22 @@ FROM (SELECT day, temp_c FROM vw_daily_temp_analysis WHERE nominal_depth_m = 20)
 JOIN (SELECT day, temp_c FROM vw_daily_temp_analysis WHERE nominal_depth_m = 85) b
     ON b.day = s.day
 ORDER BY s.day;
+
+-- Governance: load audit trail. Deliberately NOT dropped by the
+-- DROP/CREATE block above -- this table's whole purpose is to survive
+-- across schema re-runs so there's a persistent history of every load,
+-- from either pipeline (Python or SQL). Without this, there's no way to
+-- answer "did the last load actually work, and how do I know?" after the
+-- fact -- the print() statements in clean_hires.py/load_hires.py are gone
+-- the moment the terminal closes.
+CREATE TABLE IF NOT EXISTS etl_load_log (
+    load_id        BIGSERIAL PRIMARY KEY,
+    pipeline        TEXT NOT NULL CHECK (pipeline IN ('python', 'sql')),
+    source_file      TEXT NOT NULL,
+    rows_source        INT NOT NULL,
+    rows_loaded           INT NOT NULL,
+    rows_rejected            INT NOT NULL,
+    started_at                  TIMESTAMPTZ NOT NULL,
+    finished_at                    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    notes                             TEXT
+);

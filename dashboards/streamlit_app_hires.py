@@ -85,11 +85,20 @@ def load_data():
         """,
         engine,
     )
-    return daily, spells, strat, trend
+    coverage = pd.read_sql(
+        """
+        SELECT COUNT(*) AS n_readings,
+               COUNT(DISTINCT deployment_id) AS n_deployments,
+               MIN("timestamp") AS earliest, MAX("timestamp") AS latest
+        FROM fact_sensor_reading
+        """,
+        engine,
+    ).iloc[0]
+    return daily, spells, strat, trend, coverage
 
 
 try:
-    daily, spells, strat, trend = load_data()
+    daily, spells, strat, trend, coverage = load_data()
 except Exception as e:
     st.error(
         "Couldn't reach the database. Check that DATABASE_URL / DB_* are set "
@@ -97,6 +106,16 @@ except Exception as e:
     )
     st.exception(e)
     st.stop()
+
+st.caption(
+    f"Analysis built from **{coverage['n_readings']:,} individual sensor readings** "
+    f"across {coverage['n_deployments']} instrument deployments, "
+    f"{coverage['earliest']:%d %b %Y} to {coverage['latest']:%d %b %Y} "
+    "(15-minute sampling interval, two depths per deployment). "
+    "Source: IMOS ANMN National Mooring Network Facility -- Temperature and Salinity "
+    "Time-Series, Maria Island National Reference Station (NRSMAI), downloaded via the "
+    "[Australian Ocean Data Network Portal](https://portal.aodn.org.au/)."
+)
 
 depth_20 = daily[daily["nominal_depth_m"] == 20].sort_values("day")
 depth_85 = daily[daily["nominal_depth_m"] == 85].sort_values("day")
@@ -217,4 +236,15 @@ st.caption(
     "Positive (red) = surface warmer than bottom, the usual stratified case. "
     "Negative (blue) = surface cooler than bottom -- a mixing/inversion event, "
     "worth cross-checking against wind/storm records if it persists."
+)
+
+st.divider()
+st.caption(
+    f"**Data**: {coverage['n_readings']:,} readings, {coverage['n_deployments']} deployments, "
+    f"{coverage['earliest']:%Y-%m-%d} to {coverage['latest']:%Y-%m-%d}. "
+    "**Source**: IMOS Australian National Mooring Network (ANMN) Facility -- Temperature "
+    "and Salinity Time-Series, National Reference Station Maria Island (NRSMAI). "
+    "Downloaded from the [AODN Portal](https://portal.aodn.org.au/) "
+    "(portal.aodn.org.au). Data provided by IMOS, a national collaborative research "
+    "infrastructure supported by the Australian Government."
 )
