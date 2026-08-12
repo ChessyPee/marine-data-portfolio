@@ -1,19 +1,19 @@
 -- Analysis 1 (revised): trend near Maria Island specifically, not
--- statewide -- restricted to the 5 densest-surveyed Maria Island Reserve
--- (MIR) monitoring sites, ~12-15km from the Maria Island NRS mooring
--- (confirmed by profiling actual site coordinates against the NRS
--- station's own lat/lon, not assumed). These 5 were chosen over the
--- handful of sites literally closest by distance because those closest
--- points turned out to be one-off surveys (1-2 visits ever) -- too
--- sparse for a trend; the MIR sites have near-annual coverage 1992-2026.
--- This scoping also makes the Maria Island temperature "proxy" far more
--- defensible: these are genuinely nearby reefs, not the whole state.
+-- statewide -- restricted to the 10 nearest, densest-surveyed Maria
+-- Island Reserve (MIR) monitoring sites, 14-23km from the Maria Island
+-- NRS mooring (profiled directly against the NRS station's own
+-- lat/lon). There are 12 MIR sites with near-annual survey coverage
+-- (39-43 surveys each, 1992-2026): this keeps the 10 closest by distance
+-- and drops the 2 farthest (MIR-S13 at 23.8km, MIR-S14 at 25.7km) so the
+-- Maria Island temperature "proxy" stays a genuinely local comparison
+-- while using the largest sample the dense-coverage tier supports.
 
 DROP VIEW IF EXISTS vw_statewide_trend;
 
 CREATE VIEW vw_statewide_trend AS
 WITH mi_sites AS (
-    SELECT unnest(ARRAY['MIR-S14','MIR-S2','MIR-S5','MIR-S3','MIR-S13']) AS site_code
+    SELECT unnest(ARRAY['MIR-S11','MIR-S1','MIR-S2','MIR-S8','MIR-S3',
+                          'MIR-S7','MIR-S5','MIR-S9','MIR-S10','MIR-S12']) AS site_code
 ),
 urchin_yearly AS (
     SELECT

@@ -302,8 +302,8 @@ fig_tl.update_layout(
 )
 fig_tl.update_annotations(font=dict(color=TEXT_BLACK))
 for row in (1, 2):
-    fig_tl.update_xaxes(gridcolor=GRID, linecolor=TEXT_BLACK, zerolinecolor=TEXT_BLACK,
-                          tickfont=dict(color=TEXT_BLACK), tickangle=-45, row=row, col=1)
+    fig_tl.update_xaxes(showgrid=True, gridcolor=GRID, linecolor=TEXT_BLACK, zerolinecolor=TEXT_BLACK,
+                          tickfont=dict(color=TEXT_BLACK), tickangle=-45, dtick=2, row=row, col=1)
     fig_tl.update_yaxes(gridcolor=GRID, linecolor=TEXT_BLACK, tickfont=dict(color=TEXT_BLACK),
                           nticks=GRID_NTICKS, secondary_y=False, row=row, col=1)
     fig_tl.update_yaxes(range=temp_range, linecolor=TEXT_BLACK, tickfont=dict(color=COLOR_TEMP),
@@ -325,8 +325,9 @@ st.caption(
 # =====================================================================
 st.header("Trend near Maria Island: urchin, canopy, and predators vs. sea temperature")
 MI_SITES_NOTE = (
-    "MIR-S2, MIR-S3, MIR-S5, MIR-S13, MIR-S14 -- the 5 Maria Island Reserve sites with the densest "
-    "survey history (39-43 surveys each, 1992-2026), 12-15km from the Maria Island NRS mooring. "
+    "MIR-S1, S2, S3, S5, S7, S8, S9, S10, S11, S12 -- the 10 nearest Maria Island Reserve sites among "
+    "the 12 with the densest survey history (39-43 surveys each, 1992-2026), 14-23km from the Maria "
+    "Island NRS mooring (the 2 farthest of the 12 dropped to keep this a tight local comparison). "
     "Restricted from statewide to these specific nearby sites so the temperature overlay is a "
     "genuinely local comparison, not a state-scale stretch."
 )
@@ -364,8 +365,8 @@ fig_sw.update_layout(height=950, font=dict(color=TEXT_BLACK), plot_bgcolor="#fcf
                        paper_bgcolor="#fcfcfb", legend=dict(font=dict(color=TEXT_BLACK), orientation="h", y=1.05))
 fig_sw.update_annotations(font=dict(color=TEXT_BLACK))
 for row in (1, 2, 3):
-    fig_sw.update_xaxes(gridcolor=GRID, linecolor=TEXT_BLACK, tickfont=dict(color=TEXT_BLACK),
-                          tickangle=-45, row=row, col=1)
+    fig_sw.update_xaxes(showgrid=True, gridcolor=GRID, linecolor=TEXT_BLACK, tickfont=dict(color=TEXT_BLACK),
+                          tickangle=-45, dtick=2, row=row, col=1)
     fig_sw.update_yaxes(gridcolor=GRID, linecolor=TEXT_BLACK, tickfont=dict(color=TEXT_BLACK),
                           nticks=6, secondary_y=False, row=row, col=1)
     fig_sw.update_yaxes(range=temp_range_sw, linecolor=TEXT_BLACK, tickfont=dict(color=COLOR_TEMP),
@@ -375,6 +376,52 @@ st.plotly_chart(fig_sw, use_container_width=True)
 st.caption(
     f"{len(statewide)} years of urchin/canopy/predator data near Maria Island, {len(temp)} years of "
     f"real temperature data. Sites used: {MI_SITES_NOTE} " + SOURCE_NOTE
+)
+
+# --- Combined, indexed view: pick any subset of metrics on one chart ---
+st.subheader("Explore: overlay any combination of metrics")
+st.caption(
+    "These metrics have different units (a count, a percent, °C) -- putting them on one raw axis "
+    "would make a count of 20 and a percent of 20 look identical in height, which would misrepresent "
+    "them. Instead each selected line is **indexed to 0-100** (its own min -> 0, its own max -> 100) "
+    "so shapes/timing are comparable -- hover over any point to see the real value and unit."
+)
+INDEX_SERIES = {
+    "Invasive urchin count": (statewide["yr"], statewide["invasive_urchin"], "#a50f15", ""),
+    "Native urchin count": (statewide["yr"], statewide["native_urchin"], "#66c2a5", ""),
+    "Canopy cover": (statewide["yr"], statewide["canopy_pct"], "#2a78d6", "%"),
+    "Lobster count": (statewide["yr"], statewide["lobster"], COLOR_SITES, ""),
+    "Abalone count": (statewide["yr"], statewide["abalone"], COLOR_EXTENT, ""),
+    "Sea temp (mean)*": (temp["yr"], temp["mean_temp_c"], COLOR_TEMP, "°C"),
+}
+selected_metrics = st.multiselect(
+    "Metrics to show", list(INDEX_SERIES.keys()),
+    default=["Invasive urchin count", "Canopy cover", "Sea temp (mean)*"],
+)
+if selected_metrics:
+    fig_idx = go.Figure()
+    for name in selected_metrics:
+        x, y, color, unit = INDEX_SERIES[name]
+        y = y.astype(float)
+        y_indexed = (y - y.min()) / (y.max() - y.min()) * 100 if y.max() > y.min() else y * 0
+        fig_idx.add_trace(go.Scatter(
+            x=x, y=y_indexed, mode="lines+markers", name=name, line=dict(color=color, width=2),
+            customdata=y, hovertemplate=f"%{{x}}: %{{customdata:.1f}}{unit}<extra>{name}</extra>",
+        ))
+    fig_idx.update_layout(
+        height=500, font=dict(color=TEXT_BLACK), plot_bgcolor="#fcfcfb", paper_bgcolor="#fcfcfb",
+        legend=dict(font=dict(color=TEXT_BLACK), orientation="h", y=1.1),
+        xaxis=dict(title=dict(text="Year", font=dict(color=TEXT_BLACK)), showgrid=True, gridcolor=GRID,
+                    linecolor=TEXT_BLACK, tickfont=dict(color=TEXT_BLACK), dtick=2),
+        yaxis=dict(title=dict(text="Indexed (0-100, own min-max)", font=dict(color=TEXT_BLACK)),
+                    showgrid=True, gridcolor=GRID, linecolor=TEXT_BLACK, tickfont=dict(color=TEXT_BLACK)),
+    )
+    st.plotly_chart(fig_idx, use_container_width=True)
+else:
+    st.info("Pick at least one metric above to draw the chart.")
+st.caption(
+    "Tip: every chart's legend in this dashboard is also click-to-toggle (Plotly's built-in behavior) "
+    "-- click a legend entry on any chart to hide/show that line without using this selector."
 )
 
 # =====================================================================
@@ -447,6 +494,36 @@ st.caption(
     "finding: fish richness and biomass are *higher*, not lower, at low-canopy sites here -- again "
     "likely a where-urchins-are-vs-what-they-do confound, not evidence that barrens help fish."
     .format(int(fish_summary.loc["low_canopy", "n"]), int(fish_summary.loc["healthy", "n"])) + " " + SOURCE_NOTE
+)
+
+# --- Does more canopy mean more fish biodiversity, continuously (not just 2 bins)? ---
+st.subheader("Canopy cover vs. fish species richness (every site-year, not just two bins)")
+biodiv_data = combined.dropna(subset=["canopy_pct", "fish_richness"])
+fig_biodiv = go.Figure(go.Scatter(
+    x=biodiv_data["canopy_pct"], y=biodiv_data["fish_richness"], mode="markers",
+    marker=dict(color=biodiv_data["fish_biomass"], colorscale=[[0, "#cde2fb"], [1, "#0d366b"]],
+                 showscale=True, colorbar=dict(title="Biomass (g)", tickfont=dict(color=TEXT_BLACK)),
+                 size=7, opacity=0.65),
+    text=[f"{r.site_code}, {int(r.yr)}" for r in biodiv_data.itertuples()], hoverinfo="text+x+y",
+))
+corr_biodiv = biodiv_data["canopy_pct"].corr(biodiv_data["fish_richness"])
+fig_biodiv.update_layout(
+    height=500, font=dict(color=TEXT_BLACK), plot_bgcolor="#fcfcfb", paper_bgcolor="#fcfcfb",
+    xaxis=dict(title=dict(text="Canopy cover (%)", font=dict(color=TEXT_BLACK)), showgrid=True,
+                gridcolor=GRID, linecolor=TEXT_BLACK, tickfont=dict(color=TEXT_BLACK)),
+    yaxis=dict(title=dict(text="Fish species richness (count)", font=dict(color=TEXT_BLACK)),
+                showgrid=True, gridcolor=GRID, linecolor=TEXT_BLACK, tickfont=dict(color=TEXT_BLACK)),
+)
+st.plotly_chart(fig_biodiv, use_container_width=True)
+richness_dir = "negative" if corr_biodiv < 0 else "positive"
+st.caption(
+    f"n={len(biodiv_data)} site-years with both metrics. Correlation(canopy %, fish richness) = "
+    f"{corr_biodiv:+.3f} -- weak and {richness_dir}, consistent with the low-canopy-vs-healthy bar "
+    "chart above (this is the same relationship shown continuously across every site-year instead of "
+    "collapsed into two bins). Same caveat applies: this doesn't isolate canopy's effect from "
+    "confounds like depth, exposure, or region. Point color = fish biomass at that site-year, so you "
+    "can also eyeball whether high-biomass points cluster anywhere on the canopy axis (they don't "
+    "obviously). " + SOURCE_NOTE
 )
 
 # =====================================================================
