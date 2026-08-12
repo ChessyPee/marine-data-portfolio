@@ -52,7 +52,7 @@ st.set_page_config(page_title="Maria Island Hi-Res Mooring Monitor", layout="wid
 st.title("Maria Island Hi-Res Mooring Monitor")
 st.caption(
     "Raw 15-minute sensor readings, IMOS/AODN National Reference Station Maria "
-    "Island (NRSMAI), two depths (20m / 85m), 2022-2026. Companion to the "
+    "Island (NRSMAI), two depths (20m / 85m). Companion to the "
     "long-term monthly dashboard -- this one can show same-day surface-vs-bottom "
     "structure and discrete warm-spell events, not just a monthly trend line."
 )
@@ -132,11 +132,12 @@ col3.metric(
 )
 col4.metric("Warm spells (3+ days) on record", len(spells))
 
+record_years = (coverage["latest"] - coverage["earliest"]).days / 365.25
 st.caption(
     f"Linear trend over the record: 20m {trend_20.values[0]:+.3f} °C/yr, "
-    f"85m {trend_85.values[0]:+.3f} °C/yr. Only ~4 years of data -- too "
-    "short to call this a climate trend; treat as deployment-to-deployment "
-    "variability, not a warming signal on its own."
+    f"85m {trend_85.values[0]:+.3f} °C/yr. Only ~{record_years:.0f} years of data -- still "
+    "short for a confident climate trend; treat as deployment-to-deployment "
+    "variability more than a settled warming signal, though longer than before."
 )
 
 st.subheader("Daily temperature by depth, with anomaly flags")

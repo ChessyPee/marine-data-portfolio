@@ -20,7 +20,7 @@ from pathlib import Path
 sys.path.append(str(Path(__file__).parent.parent))
 from db import get_engine, run_sql_file  # noqa: E402
 
-RAW_PATH = Path(__file__).parent / "data" / "raw" / "mooring_hires_raw.csv"
+RAW_PATH = Path(__file__).parent / "data" / "raw" / "mooring_hires_raw_2018_2026.csv"
 STAGING_SCHEMA = Path(__file__).parent / "schema_staging_sql.sql"
 HEADER_OFFSET = 22  # lines of IMOS metadata/QC-flag-meaning block above the real header
 

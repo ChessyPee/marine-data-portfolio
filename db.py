@@ -33,12 +33,26 @@ def get_engine():
 def run_sql_file(engine, path):
     """Run a .sql file containing multiple ; separated statements."""
     sql = Path(path).read_text(encoding="utf-8")
+    # Splitting on ";" is naive -- a "--" comment line that happens to
+    # contain a "." in normal English prose (e.g. "too sparse for a
+    # trend; the rest of this sentence...") gets cut mid-line, turning
+    # the tail into un-commented, invalid SQL. Strip "-- ..." comment
+    # content per line BEFORE splitting on ";", so punctuation inside
+    # comments can never influence the split (found via a real failure,
+    # not guessed) -- this assumes no line has a literal "--" inside a
+    # string value that must survive, true of every .sql file here.
+    lines = []
+    for line in sql.split("\n"):
+        idx = line.find("--")
+        lines.append(line[:idx] if idx != -1 else line)
+    sql_no_comments = "\n".join(lines)
     with engine.begin() as conn:
-        for statement in sql.split(";"):
+        for statement in sql_no_comments.split(";"):
             statement = statement.strip()
             if statement:
                 # psycopg2's cursor.execute() treats a bare "%" as a
-                # pyformat parameter marker even inside a SQL comment --
-                # escape to "%%" so a literal "%" in a comment (e.g. "50%
-                # of rows...") doesn't crash with "dict is not a sequence".
+                # pyformat parameter marker even inside SQL text --
+                # escape to "%%" so a literal "%" (e.g. "50% of rows...",
+                # or a LIKE 'foo%' pattern) doesn't crash with "dict is
+                # not a sequence".
                 conn.exec_driver_sql(statement.replace("%", "%%"))

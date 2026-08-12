@@ -320,38 +320,61 @@ st.caption(
 )
 
 # =====================================================================
-# Analysis 1: statewide trend -- temp, urchin, canopy, predators
+# Analysis 1: trend near Maria Island -- urchin, canopy, predators,
+# each overlaid with the real Maria Island temperature record
 # =====================================================================
-st.header("Statewide trend: urchin, canopy, and predators, 1992-2026")
-fig_sw = make_subplots(
-    rows=4, cols=1, shared_xaxes=True, vertical_spacing=0.05,
-    subplot_titles=(
-        f"Sea temp, 20m* ({temp['yr'].min()}-{temp['yr'].max()} real record only)",
-        "Invasive urchin (statewide count)", "Mean canopy cover (%)",
-        "Lobster & abalone (statewide count)",
-    ),
+st.header("Trend near Maria Island: urchin, canopy, and predators vs. sea temperature")
+MI_SITES_NOTE = (
+    "MIR-S2, MIR-S3, MIR-S5, MIR-S13, MIR-S14 -- the 5 Maria Island Reserve sites with the densest "
+    "survey history (39-43 surveys each, 1992-2026), 12-15km from the Maria Island NRS mooring. "
+    "Restricted from statewide to these specific nearby sites so the temperature overlay is a "
+    "genuinely local comparison, not a state-scale stretch."
 )
-fig_sw.add_trace(go.Scatter(x=temp["yr"], y=temp["mean_temp_c"], mode="lines+markers",
-                              line=dict(color=COLOR_TEMP, width=2), name="Sea temp (mean)*"), row=1, col=1)
+fig_sw = make_subplots(
+    rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.08,
+    specs=[[{"secondary_y": True}], [{"secondary_y": True}], [{"secondary_y": True}]],
+    subplot_titles=("Invasive urchin count vs. sea temp", "Canopy cover (%) vs. sea temp",
+                      "Lobster & abalone count vs. sea temp"),
+)
+temp_range_sw = [min(temp["mean_temp_c"].min(), temp["p90_temp_c"].min()) - 0.5,
+                  max(temp["mean_temp_c"].max(), temp["p90_temp_c"].max()) + 0.5]
+for row in (1, 2, 3):
+    fig_sw.add_trace(go.Scatter(x=temp["yr"], y=temp["p90_temp_c"], mode="lines", line=dict(width=0),
+                                  showlegend=False, hoverinfo="skip"), row=row, col=1, secondary_y=True)
+    fig_sw.add_trace(go.Scatter(x=temp["yr"], y=temp["mean_temp_c"], mode="lines", line=dict(width=0),
+                                  fill="tonexty", fillcolor="rgba(44,162,95,0.28)",
+                                  name="Sea temp mean-p90 band*", legendgroup="temp", showlegend=(row == 1)),
+                       row=row, col=1, secondary_y=True)
+    fig_sw.add_trace(go.Scatter(x=temp["yr"], y=temp["mean_temp_c"], mode="lines+markers",
+                                  line=dict(color=COLOR_TEMP, width=2, dash="dot"), name="Sea temp (mean)*",
+                                  legendgroup="temp", showlegend=(row == 1)), row=row, col=1, secondary_y=True)
 fig_sw.add_trace(go.Scatter(x=statewide["yr"], y=statewide["invasive_urchin"], mode="lines+markers",
-                              line=dict(color="#a50f15", width=2), name="Invasive urchin"), row=2, col=1)
+                              line=dict(color="#a50f15", width=2), name="Invasive urchin"),
+                   row=1, col=1, secondary_y=False)
 fig_sw.add_trace(go.Scatter(x=statewide["yr"], y=statewide["canopy_pct"], mode="lines+markers",
-                              line=dict(color="#1a9850", width=2), name="Canopy %"), row=3, col=1)
+                              line=dict(color="#2a78d6", width=2), name="Canopy %"),
+                   row=2, col=1, secondary_y=False)
 fig_sw.add_trace(go.Scatter(x=statewide["yr"], y=statewide["lobster"], mode="lines+markers",
-                              line=dict(color=COLOR_SITES, width=2), name="Lobster"), row=4, col=1)
+                              line=dict(color=COLOR_SITES, width=2), name="Lobster"),
+                   row=3, col=1, secondary_y=False)
 fig_sw.add_trace(go.Scatter(x=statewide["yr"], y=statewide["abalone"], mode="lines+markers",
-                              line=dict(color=COLOR_EXTENT, width=2), name="Abalone"), row=4, col=1)
+                              line=dict(color=COLOR_EXTENT, width=2), name="Abalone"),
+                   row=3, col=1, secondary_y=False)
 fig_sw.update_layout(height=950, font=dict(color=TEXT_BLACK), plot_bgcolor="#fcfcfb",
                        paper_bgcolor="#fcfcfb", legend=dict(font=dict(color=TEXT_BLACK), orientation="h", y=1.05))
 fig_sw.update_annotations(font=dict(color=TEXT_BLACK))
-for row in (1, 2, 3, 4):
-    fig_sw.update_xaxes(gridcolor=GRID, linecolor=TEXT_BLACK, tickfont=dict(color=TEXT_BLACK), row=row, col=1)
-    fig_sw.update_yaxes(gridcolor=GRID, linecolor=TEXT_BLACK, tickfont=dict(color=TEXT_BLACK), row=row, col=1)
+for row in (1, 2, 3):
+    fig_sw.update_xaxes(gridcolor=GRID, linecolor=TEXT_BLACK, tickfont=dict(color=TEXT_BLACK),
+                          tickangle=-45, row=row, col=1)
+    fig_sw.update_yaxes(gridcolor=GRID, linecolor=TEXT_BLACK, tickfont=dict(color=TEXT_BLACK),
+                          nticks=6, secondary_y=False, row=row, col=1)
+    fig_sw.update_yaxes(range=temp_range_sw, linecolor=TEXT_BLACK, tickfont=dict(color=COLOR_TEMP),
+                          title=dict(text="Sea temp (°C)*", font=dict(color=COLOR_TEMP)),
+                          nticks=6, showgrid=False, secondary_y=True, row=row, col=1)
 st.plotly_chart(fig_sw, use_container_width=True)
 st.caption(
-    f"{len(statewide)} years of urchin/canopy/predator data (1992-2026, gaps where no survey ran), "
-    f"{len(temp)} years of real temperature data. Not on one dual-axis chart -- four different "
-    "units/scales, deliberately kept as small multiples sharing only the x-axis. " + SOURCE_NOTE
+    f"{len(statewide)} years of urchin/canopy/predator data near Maria Island, {len(temp)} years of "
+    f"real temperature data. Sites used: {MI_SITES_NOTE} " + SOURCE_NOTE
 )
 
 # =====================================================================
@@ -477,24 +500,48 @@ st.caption(
 # Analysis 7 (bonus): which fish species are rising/falling
 # =====================================================================
 st.header("Which fish species are rising or falling over time?")
-top_rising = species_trend.head(10).sort_values("trend_per_year")
-top_falling = species_trend.tail(10).sort_values("trend_per_year")
+# Common names from general reference, not from the dataset (RLS only
+# provides scientific names) -- worth double-checking against a field
+# guide before quoting confidently in an interview.
+COMMON_NAMES = {
+    "Trachinops caudimaculatus": "Southern hulafish", "Caesioperca rasor": "Barber perch",
+    "Neoodax balteatus": "Little rock whiting", "Notolabrus tetricus": "Bluethroat wrasse",
+    "Pempheris multiradiata": "Bigscale bullseye", "Trachurus declivis": "Common jack mackerel",
+    "Pictilabrus laticlavius": "Senator wrasse", "Notolabrus fucicola": "Purple wrasse",
+    "Acanthaluteres vittiger": "Toothbrush leatherjacket", "Diodon nichthemerus": "Globefish",
+    "Atypichthys strigatus": "Mado", "Scorpis lineolata": "Silver sweep",
+    "Dinolestes lewini": "Longfin pike", "Olisthops cyanomelas": "Herring cale",
+    "Caesioperca lepidoptera": "Butterfly perch", "Parma microlepis": "White-ear",
+    "Upeneichthys vlamingii": "Blue-spotted goatfish", "Aplodactylus arctidens": "Marblefish",
+    "Girella zebra": "Zebra fish", "Scorpis aequipinnis": "Sea sweep",
+}
+def display_name(sci):
+    common = COMMON_NAMES.get(sci)
+    return f"{common} ({sci})" if common else sci
+
+top_rising = species_trend.head(10).sort_values("trend_per_year").copy()
+top_falling = species_trend.tail(10).sort_values("trend_per_year").copy()
+top_rising["label"] = top_rising["species_name"].apply(display_name)
+top_falling["label"] = top_falling["species_name"].apply(display_name)
 fig_species = go.Figure()
-fig_species.add_trace(go.Bar(y=top_rising["species_name"], x=top_rising["trend_per_year"],
+fig_species.add_trace(go.Bar(y=top_rising["label"], x=top_rising["trend_per_year"],
                                orientation="h", marker=dict(color="#1a9850"), name="Rising"))
-fig_species.add_trace(go.Bar(y=top_falling["species_name"], x=top_falling["trend_per_year"],
+fig_species.add_trace(go.Bar(y=top_falling["label"], x=top_falling["trend_per_year"],
                                orientation="h", marker=dict(color="#a50f15"), name="Falling"))
 fig_species.update_layout(
     height=600, font=dict(color=TEXT_BLACK), plot_bgcolor="#fcfcfb", paper_bgcolor="#fcfcfb",
-    xaxis=dict(title=dict(text="Trend (count / year)", font=dict(color=TEXT_BLACK)), gridcolor=GRID,
-                linecolor=TEXT_BLACK, tickfont=dict(color=TEXT_BLACK)),
+    xaxis=dict(title=dict(text="Change in count per year  (right of 0 = rising, left of 0 = falling)",
+                            font=dict(color=TEXT_BLACK)), gridcolor=GRID, zerolinecolor=TEXT_BLACK,
+                zerolinewidth=2, linecolor=TEXT_BLACK, tickfont=dict(color=TEXT_BLACK)),
     yaxis=dict(linecolor=TEXT_BLACK, tickfont=dict(color=TEXT_BLACK)),
-    legend=dict(font=dict(color=TEXT_BLACK)), margin=dict(l=220),
+    legend=dict(font=dict(color=TEXT_BLACK)), margin=dict(l=260),
 )
 st.plotly_chart(fig_species, use_container_width=True)
 st.caption(
     f"Top 10 rising and top 10 falling fish species by linear trend (species observed in >=10 distinct "
-    f"years only, {species_trend['species_name'].nunique()} species qualify). Raw count trend, not "
-    "controlled for survey effort changes over time -- a real trend, but treat the exact slope as "
-    "indicative, not precise. " + SOURCE_NOTE
+    f"years only, {species_trend['species_name'].nunique()} species qualify). The x-axis is a **rate of "
+    "change** (count/year), not a year -- 0 means no change, bars extend right for species increasing "
+    "and left for species decreasing. Raw count trend, not controlled for survey effort changes over "
+    "time -- a real trend, but treat the exact slope as indicative, not precise. Common names are from "
+    "general reference (not in the source dataset) -- verify before quoting. " + SOURCE_NOTE
 )
