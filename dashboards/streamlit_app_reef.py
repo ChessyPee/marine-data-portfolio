@@ -35,7 +35,21 @@ GBR = [
 ]
 COLOR_SITES = "#2a78d6"
 COLOR_EXTENT = "#eb6834"
-COLOR_TEMP = "#2ca25f"  # light green, as originally requested -- was gray, easy to miss on white
+# Sea temperature is blue/light-blue everywhere it appears (this timeline map,
+# "Spread over time", "Trend near Maria Island", and "Explore") -- one
+# consistent color code for the same variable across every chart, per
+# explicit request. Previously green, which also collided with canopy's
+# green once canopy was made green.
+COLOR_TEMP = "#1f6fb2"
+COLOR_TEMP_FILL = "rgba(31,111,178,0.25)"
+COLOR_LOBSTER = "#8073ac"  # purple -- was reusing COLOR_SITES blue, which now clashes with sea temp's blue
+COLOR_NATIVE_URCHIN = "#c9a227"  # amber -- was teal, too close to canopy green
+# Pink -> red -> purple, for markers whose size ALSO encodes magnitude (the
+# sightings-by-year map): a linear light-to-dark ramp on skewed count data
+# (most site-years are small counts) reads as "everything is pale" -- this
+# still increases in saturation across the low range instead of holding pale
+# pink for most of the data.
+PINK_RED_PURPLE = [[0.0, "#f8a5c2"], [0.35, "#e0457b"], [0.65, "#c81d5e"], [1.0, "#6a0dad"]]
 TEXT_BLACK = "#000000"
 GRID = "#333333"
 
@@ -209,7 +223,17 @@ st.subheader("Sightings by year (drag the slider, or press play)")
 fig_anim = go.Figure()
 years_sorted = sorted(sightings["yr"].unique())
 count_min, count_max = sightings["count"].min(), sightings["count"].max()
-REDS = ["#fee5d9", "#fcae91", "#fb6a4a", "#de2d26", "#a50f15"]
+# Counts are heavily right-skewed (most site-years are small, a handful are
+# in the hundreds) -- sizing/coloring off the raw max makes every typical
+# point tiny and pale. Size uses sqrt (area-proportional) with a much higher
+# floor so the smallest counts are still clearly visible dots, not pinpricks.
+# Color is capped at the 90th percentile (not the raw max) and ramps
+# pink -> red -> purple so saturation builds across the common low range
+# instead of everything sitting near one pale end of the scale.
+color_cap_sightings = sightings["count"].quantile(0.90)
+def anim_marker_size(counts):
+    return 14 + (counts.clip(lower=0) ** 0.5 / (count_max ** 0.5)) * 34
+
 frames = []
 for yr in years_sorted:
     d = sightings[sightings["yr"] == yr]
@@ -217,8 +241,8 @@ for yr in years_sorted:
         name=str(yr),
         data=[go.Scattermapbox(
             lat=d["latitude"], lon=d["longitude"], mode="markers",
-            marker=dict(size=(d["count"] / count_max * 28).clip(lower=6), color=d["count"],
-                         colorscale=REDS, cmin=count_min, cmax=count_max, showscale=True,
+            marker=dict(size=anim_marker_size(d["count"]), color=d["count"],
+                         colorscale=PINK_RED_PURPLE, cmin=count_min, cmax=color_cap_sightings, showscale=True,
                          colorbar=dict(title="Count", tickfont=dict(color=TEXT_BLACK))),
             text=[f"{r.site_code}<br>Count: {int(r.count)}" for r in d.itertuples()],
             hoverinfo="text",
@@ -227,8 +251,8 @@ for yr in years_sorted:
 first = sightings[sightings["yr"] == years_sorted[0]]
 fig_anim.add_trace(go.Scattermapbox(
     lat=first["latitude"], lon=first["longitude"], mode="markers",
-    marker=dict(size=(first["count"] / count_max * 28).clip(lower=6), color=first["count"],
-                 colorscale=REDS, cmin=count_min, cmax=count_max, showscale=True,
+    marker=dict(size=anim_marker_size(first["count"]), color=first["count"],
+                 colorscale=PINK_RED_PURPLE, cmin=count_min, cmax=color_cap_sightings, showscale=True,
                  colorbar=dict(title="Count", tickfont=dict(color=TEXT_BLACK))),
     text=[f"{r.site_code}<br>Count: {int(r.count)}" for r in first.itertuples()],
     hoverinfo="text",
@@ -258,7 +282,8 @@ st.plotly_chart(fig_anim, use_container_width=True)
 st.caption(
     f"{len(sightings)} site-year sighting records, {sightings['site_code'].nunique()} distinct "
     f"sites, {years_sorted[0]}-{years_sorted[-1]}. Marker size and color both encode that year's "
-    "count. " + SOURCE_NOTE
+    f"count. Color capped at the 90th percentile ({color_cap_sightings:.0f}) so a handful of very "
+    "large counts don't wash out the (much more common) small ones as pale. " + SOURCE_NOTE
 )
 
 # --- Timeline: sites + extent, each with a shared temperature overlay ---
@@ -283,7 +308,7 @@ for row in (1, 2):
                                   line=dict(width=0), showlegend=False, hoverinfo="skip"),
                        row=row, col=1, secondary_y=True)
     fig_tl.add_trace(go.Scatter(x=temp["yr"], y=temp["mean_temp_c"], mode="lines",
-                                  line=dict(width=0), fill="tonexty", fillcolor="rgba(44,162,95,0.28)",
+                                  line=dict(width=0), fill="tonexty", fillcolor=COLOR_TEMP_FILL,
                                   name="Sea temp mean-p90 band", showlegend=(row == 1), legendgroup="temp",
                                   hoverinfo="skip"),
                        row=row, col=1, secondary_y=True)
@@ -321,7 +346,7 @@ for row in (1, 2):
 st.plotly_chart(fig_tl, use_container_width=True)
 st.caption(
     f"{len(colonized)} year(s) of urchin site-count data, {len(temp)} year(s) of real temperature "
-    "data. Right axis (green band + dotted line) is sea temperature on both panels, sharing the "
+    "data. Right axis (blue band + dotted line) is sea temperature on both panels, sharing the "
     "same scale, so the band's position/height is directly comparable panel to panel. "
     "\\* Temperature measured at the Maria Island National Reference Station specifically, used "
     "here as a representative proxy for Tasmanian east-coast sea temperature more broadly -- not a "
@@ -351,7 +376,7 @@ for row in (1, 2, 3):
     fig_sw.add_trace(go.Scatter(x=temp["yr"], y=temp["p90_temp_c"], mode="lines", line=dict(width=0),
                                   showlegend=False, hoverinfo="skip"), row=row, col=1, secondary_y=True)
     fig_sw.add_trace(go.Scatter(x=temp["yr"], y=temp["mean_temp_c"], mode="lines", line=dict(width=0),
-                                  fill="tonexty", fillcolor="rgba(44,162,95,0.28)",
+                                  fill="tonexty", fillcolor=COLOR_TEMP_FILL,
                                   name="Sea temp mean-p90 band*", legendgroup="temp", showlegend=(row == 1)),
                        row=row, col=1, secondary_y=True)
     fig_sw.add_trace(go.Scatter(x=temp["yr"], y=temp["mean_temp_c"], mode="lines+markers",
@@ -365,7 +390,7 @@ fig_sw.add_trace(go.Scatter(x=statewide["yr"], y=statewide["canopy_pct"], mode="
                               line=dict(color="#0d8a3e", width=2), name="Canopy %"),
                    row=2, col=1, secondary_y=False)
 fig_sw.add_trace(go.Scatter(x=statewide["yr"], y=statewide["lobster"], mode="lines+markers",
-                              line=dict(color=COLOR_SITES, width=2), name="Lobster"),
+                              line=dict(color=COLOR_LOBSTER, width=2), name="Lobster"),
                    row=3, col=1, secondary_y=False)
 fig_sw.add_trace(go.Scatter(x=statewide["yr"], y=statewide["abalone"], mode="lines+markers",
                               line=dict(color=COLOR_EXTENT, width=2), name="Abalone"),
@@ -397,9 +422,9 @@ st.caption(
 )
 INDEX_SERIES = {
     "Invasive urchin count": (statewide["yr"], statewide["invasive_urchin"], "#a50f15", "", 4),
-    "Native urchin count": (statewide["yr"], statewide["native_urchin"], "#66c2a5", "", 2),
+    "Native urchin count": (statewide["yr"], statewide["native_urchin"], COLOR_NATIVE_URCHIN, "", 2),
     "Canopy cover": (statewide["yr"], statewide["canopy_pct"], "#0d8a3e", "%", 2),
-    "Lobster count": (statewide["yr"], statewide["lobster"], COLOR_SITES, "", 2),
+    "Lobster count": (statewide["yr"], statewide["lobster"], COLOR_LOBSTER, "", 2),
     "Abalone count": (statewide["yr"], statewide["abalone"], COLOR_EXTENT, "", 2),
     "Sea temp (mean)*": (temp["yr"], temp["mean_temp_c"], COLOR_TEMP, "°C", 2),
 }
@@ -438,35 +463,49 @@ st.caption(
 # =====================================================================
 st.header("Does canopy cover fall as invasive urchin density rises?")
 scatter_data = combined.dropna(subset=["canopy_pct"]).copy()
-# Color scale capped at the 95th percentile, not the raw max -- a few
-# extreme outlier counts (up to 453) would otherwise wash out every
-# other point as "green" on a linear scale. Capping is noted in the
-# caption, not hidden.
-color_cap = scatter_data["invasive_urchin_count"].quantile(0.95)
-fig_scatter3 = go.Figure(go.Scatter(
-    x=scatter_data["invasive_urchin_count"], y=scatter_data["canopy_pct"], mode="markers",
-    marker=dict(
-        color=scatter_data["invasive_urchin_count"], colorscale=[[0, "#1a9850"], [1, "#a50f15"]],
-        cmin=0, cmax=color_cap, showscale=True,
-        colorbar=dict(title="Invasive<br>urchin count", tickfont=dict(color=TEXT_BLACK)),
-        size=8, opacity=0.65,
-    ),
-    text=[f"{r.site_code}, {int(r.yr)}: {int(r.invasive_urchin_count)} urchins" for r in scatter_data.itertuples()],
-    hoverinfo="text+y",
-))
+scatter_data["yr"] = scatter_data["yr"].astype(int)
+# One trace per year (not a single trace colored by a continuous scale) so
+# the legend is click-to-toggle per year -- lets you isolate individual
+# years instead of only reading a colorbar. Colors sampled from the same
+# green->blue->red->purple "time" ramp used for first-detection year on the
+# map above, so year identity uses a consistent code across the dashboard.
+urchin_sqrt = scatter_data["invasive_urchin_count"].clip(lower=0) ** 0.5
+urchin_sqrt_max = urchin_sqrt.max() if urchin_sqrt.max() > 0 else 1
+scatter_data["marker_size"] = 7 + (urchin_sqrt / urchin_sqrt_max) * 28
+years_sc = sorted(scatter_data["yr"].unique())
+try:
+    import plotly.colors as pcolors
+    year_colors = pcolors.sample_colorscale(GBR, [i / max(len(years_sc) - 1, 1) for i in range(len(years_sc))])
+except Exception:
+    year_colors = [GBR[i % len(GBR)][1] for i in range(len(years_sc))]
+
+fig_scatter3 = go.Figure()
+for i, yr in enumerate(years_sc):
+    d = scatter_data[scatter_data["yr"] == yr]
+    fig_scatter3.add_trace(go.Scatter(
+        x=d["canopy_pct"], y=d["invasive_urchin_count"], mode="markers", name=str(yr),
+        marker=dict(color=year_colors[i], size=d["marker_size"], opacity=0.75,
+                     line=dict(width=0.5, color="white")),
+        text=[f"{r.site_code}, {yr}: {int(r.invasive_urchin_count)} urchins, {r.canopy_pct:.1f}% canopy"
+              for r in d.itertuples()],
+        hoverinfo="text",
+    ))
 fig_scatter3.update_layout(
-    height=500, font=dict(color=TEXT_BLACK), plot_bgcolor="#fcfcfb", paper_bgcolor="#fcfcfb",
-    yaxis=dict(title=dict(text="Canopy %", font=dict(color=TEXT_BLACK)), showgrid=True, gridcolor=GRID,
+    height=550, font=dict(color=TEXT_BLACK), plot_bgcolor="#fcfcfb", paper_bgcolor="#fcfcfb",
+    xaxis=dict(title=dict(text="Canopy %", font=dict(color=TEXT_BLACK)), showgrid=True, gridcolor=GRID,
                 linecolor=TEXT_BLACK, tickfont=dict(color=TEXT_BLACK)),
-    xaxis=dict(title=dict(text="Invasive urchin count (that site-year)", font=dict(color=TEXT_BLACK)),
+    yaxis=dict(title=dict(text="Invasive urchin count (that site-year)", font=dict(color=TEXT_BLACK)),
                 showgrid=True, gridcolor=GRID, linecolor=TEXT_BLACK, tickfont=dict(color=TEXT_BLACK)),
+    legend=dict(title=dict(text="Year<br>(click to<br>toggle)", font=dict(color=TEXT_BLACK)),
+                 font=dict(color=TEXT_BLACK), itemsizing="constant"),
 )
 st.plotly_chart(fig_scatter3, use_container_width=True)
 corr_canopy_urchin = scatter_data["invasive_urchin_count"].corr(scatter_data["canopy_pct"])
 st.caption(
-    f"n={len(scatter_data)} site-years with both metrics. Correlation(urchin count, canopy %) = "
-    f"{corr_canopy_urchin:+.3f}. Color scale capped at the 95th percentile ({color_cap:.0f} urchins) so "
-    "a handful of extreme counts (up to 453) don't wash out every other point as green. "
+    f"n={len(scatter_data)} site-years with both metrics, {len(years_sc)} years ({years_sc[0]}-{years_sc[-1]}). "
+    f"Correlation(urchin count, canopy %) = {corr_canopy_urchin:+.3f}. Dot color = survey year (click a "
+    "year in the legend to isolate or hide it); dot size = that site-year's urchin count (bigger dot = "
+    "more urchins), so the two encode the same variable on two channels for a faster read. "
     "**Counterintuitive result, stated plainly**: canopy doesn't fall as urchin count rises here -- the "
     "correlation is weak and, if anything, in the opposite direction from the barren-formation "
     "hypothesis. Most likely explanation: this pools all sites/years together, so it captures *where "
@@ -481,33 +520,54 @@ st.caption(
 # =====================================================================
 st.header("Fish community: low-canopy vs. healthy-canopy sites")
 CANOPY_CUTOFF = combined["canopy_pct"].quantile(0.25)
-fish_data = combined.dropna(subset=["canopy_pct", "fish_richness"]).copy()
+fish_data = combined.dropna(subset=["canopy_pct", "fish_richness", "fish_count"]).copy()
 fish_data["status"] = fish_data["canopy_pct"].apply(lambda c: "low_canopy" if c < CANOPY_CUTOFF else "healthy")
 fish_summary = fish_data.groupby("status").agg(
-    n=("site_code", "count"), avg_richness=("fish_richness", "mean"), avg_biomass=("fish_biomass", "mean"),
+    n=("site_code", "count"), avg_richness=("fish_richness", "mean"),
+    avg_count=("fish_count", "mean"), avg_biomass=("fish_biomass", "mean"),
 ).reindex(["low_canopy", "healthy"])
-fc1, fc2 = st.columns(2)
-fig_rich = go.Figure(go.Bar(x=fish_summary.index, y=fish_summary["avg_richness"],
-                              marker=dict(color=["#eb6834", "#1a9850"])))
-fig_rich.update_layout(height=400, font=dict(color=TEXT_BLACK), plot_bgcolor="#fcfcfb", paper_bgcolor="#fcfcfb",
-                         title=dict(text="Avg fish species richness", font=dict(color=TEXT_BLACK)),
-                         yaxis=dict(gridcolor=GRID, linecolor=TEXT_BLACK, tickfont=dict(color=TEXT_BLACK)),
-                         xaxis=dict(linecolor=TEXT_BLACK, tickfont=dict(color=TEXT_BLACK)))
-fc1.plotly_chart(fig_rich, use_container_width=True)
-fig_bio = go.Figure(go.Bar(x=fish_summary.index, y=fish_summary["avg_biomass"],
-                             marker=dict(color=["#eb6834", "#1a9850"])))
-fig_bio.update_layout(height=400, font=dict(color=TEXT_BLACK), plot_bgcolor="#fcfcfb", paper_bgcolor="#fcfcfb",
-                        title=dict(text="Avg fish biomass (g)", font=dict(color=TEXT_BLACK)),
-                        yaxis=dict(gridcolor=GRID, linecolor=TEXT_BLACK, tickfont=dict(color=TEXT_BLACK)),
-                        xaxis=dict(linecolor=TEXT_BLACK, tickfont=dict(color=TEXT_BLACK)))
-fc2.plotly_chart(fig_bio, use_container_width=True)
+fm1, fm2, fm3, fm4 = st.columns(4)
+fm1.metric("Low canopy: avg species richness", f"{fish_summary.loc['low_canopy','avg_richness']:.1f} types")
+fm2.metric("Healthy canopy: avg species richness", f"{fish_summary.loc['healthy','avg_richness']:.1f} types")
+fm3.metric("Low canopy: avg fish counted", f"{fish_summary.loc['low_canopy','avg_count']:.0f} fish")
+fm4.metric("Healthy canopy: avg fish counted", f"{fish_summary.loc['healthy','avg_count']:.0f} fish")
+
+# Richness (types of fish) vs. count (number of fish) together, per
+# site-year, colored by canopy status -- replaces two disconnected bar
+# charts (one per metric) that couldn't show whether a site with more
+# *kinds* of fish also had more *fish*, which is the actually interesting
+# question here.
+fig_fish = go.Figure()
+for status, color, label in [("low_canopy", "#eb6834", "Low canopy (<25th pct)"),
+                               ("healthy", "#1a9850", "Healthy canopy")]:
+    d = fish_data[fish_data["status"] == status]
+    fig_fish.add_trace(go.Scatter(
+        x=d["fish_richness"], y=d["fish_count"], mode="markers", name=label,
+        marker=dict(color=color, size=9, opacity=0.6),
+        text=[f"{r.site_code}, {int(r.yr)}: {int(r.fish_richness)} species, {int(r.fish_count)} fish counted"
+              for r in d.itertuples()],
+        hoverinfo="text",
+    ))
+fig_fish.update_layout(
+    height=500, font=dict(color=TEXT_BLACK), plot_bgcolor="#fcfcfb", paper_bgcolor="#fcfcfb",
+    xaxis=dict(title=dict(text="Fish species richness (types observed)", font=dict(color=TEXT_BLACK)),
+                showgrid=True, gridcolor=GRID, linecolor=TEXT_BLACK, tickfont=dict(color=TEXT_BLACK)),
+    yaxis=dict(title=dict(text="Fish counted (number of individuals)", font=dict(color=TEXT_BLACK)),
+                showgrid=True, gridcolor=GRID, linecolor=TEXT_BLACK, tickfont=dict(color=TEXT_BLACK)),
+    legend=dict(font=dict(color=TEXT_BLACK), orientation="h", y=1.08),
+)
+st.plotly_chart(fig_fish, use_container_width=True)
+corr_rich_count = fish_data["fish_richness"].corr(fish_data["fish_count"])
 st.caption(
     f"'Low canopy' = canopy % below the real 25th percentile ({CANOPY_CUTOFF:.1f}%), not a guessed "
     "threshold -- true near-zero barrens (<5% canopy) are rare in this dataset (17 site-years total), "
-    "too few to compare on their own. n={0} low_canopy, n={1} healthy. Consistent with the Analysis-3 "
-    "finding: fish richness and biomass are *higher*, not lower, at low-canopy sites here -- again "
-    "likely a where-urchins-are-vs-what-they-do confound, not evidence that barrens help fish."
-    .format(int(fish_summary.loc["low_canopy", "n"]), int(fish_summary.loc["healthy", "n"])) + " " + SOURCE_NOTE
+    f"too few to compare on their own. n={int(fish_summary.loc['low_canopy','n'])} low_canopy, "
+    f"n={int(fish_summary.loc['healthy','n'])} healthy. Each dot is one site-year: x = how many different "
+    "fish species were seen, y = how many individual fish were counted in total -- correlation between "
+    f"the two is {corr_rich_count:+.3f} (more species tends to come with more fish, unsurprisingly). "
+    "Consistent with the Analysis-3 finding: richness and count are both *higher*, not lower, at "
+    "low-canopy sites here -- again likely a where-urchins-are-vs-what-they-do confound, not evidence "
+    "that barrens help fish. " + SOURCE_NOTE
 )
 
 # --- Does more canopy mean more fish biodiversity, continuously (not just 2 bins)? ---

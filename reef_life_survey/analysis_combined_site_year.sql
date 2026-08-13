@@ -51,7 +51,8 @@ canopy AS (
 fish AS (
     SELECT site_code, EXTRACT(YEAR FROM survey_date)::int AS yr,
         COUNT(DISTINCT species_name) AS fish_richness,
-        SUM(biomass) AS fish_biomass
+        SUM(biomass) AS fish_biomass,
+        SUM(total) AS fish_count
     FROM rls_clean_fish
     WHERE site_code IN (SELECT site_code FROM mi_sites)
     GROUP BY site_code, EXTRACT(YEAR FROM survey_date)::int
@@ -60,7 +61,7 @@ SELECT
     sy.site_code, sy.yr,
     COALESCE(u.invasive_urchin_count, 0) AS invasive_urchin_count,
     COALESCE(u.native_urchin_count, 0) AS native_urchin_count,
-    c.canopy_pct, f.fish_richness, f.fish_biomass
+    c.canopy_pct, f.fish_richness, f.fish_biomass, f.fish_count
 FROM site_years sy
 LEFT JOIN urchin u ON u.site_code = sy.site_code AND u.yr = sy.yr
 LEFT JOIN canopy c ON c.site_code = sy.site_code AND c.yr = sy.yr
