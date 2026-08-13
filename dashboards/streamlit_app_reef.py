@@ -694,16 +694,17 @@ st.caption(
     "real values."
 )
 species_pool = pd.concat([top_rising, top_falling])[["species_name", "label"]].drop_duplicates()
-species_choices = dict(zip(species_pool["label"], species_pool["species_name"]))
+species_choices = {"None (no species line)": None, **dict(zip(species_pool["label"], species_pool["species_name"]))}
 default_label = top_rising["label"].iloc[-1] if len(top_rising) else list(species_choices.keys())[0]
 selected_label = st.selectbox("Species", list(species_choices.keys()),
                                 index=list(species_choices.keys()).index(default_label))
 selected_species = species_choices[selected_label]
-sp_data = species_yearly_full[species_yearly_full["species_name"] == selected_species].sort_values("yr")
+if selected_species is not None:
+    sp_data = species_yearly_full[species_yearly_full["species_name"] == selected_species].sort_values("yr")
 
 DRILLDOWN_COVARIATES = {
     "Canopy cover": (statewide["yr"], statewide["canopy_pct"], "#0d8a3e", "%", 2),
-    "Invasive urchin count": (statewide["yr"], statewide["invasive_urchin"], "#a50f15", "", 2),
+    "Invasive urchin count": (statewide["yr"], statewide["invasive_urchin"], "#a50f15", "", 4),
     "Lobster count": (statewide["yr"], statewide["lobster"], COLOR_LOBSTER, "", 2),
     "Sea temp (mean)*": (temp["yr"], temp["mean_temp_c"], COLOR_TEMP, "°C", 2),
 }
@@ -713,14 +714,15 @@ selected_covariates = st.multiselect(
 )
 
 fig_drill = go.Figure()
-sp_y = sp_data["total_count"].astype(float)
-sp_span = sp_y.max() - sp_y.min()
-sp_indexed = (sp_y - sp_y.min()) / sp_span * 100 if sp_span > 0 else sp_y * 0
-fig_drill.add_trace(go.Scatter(
-    x=sp_data["yr"], y=sp_indexed, mode="lines+markers", name=selected_label,
-    line=dict(color=TEXT_BLACK, width=4), customdata=sp_y,
-    hovertemplate=f"%{{x}}: %{{customdata:.0f}} counted<extra>{selected_label}</extra>",
-))
+if selected_species is not None:
+    sp_y = sp_data["total_count"].astype(float)
+    sp_span = sp_y.max() - sp_y.min()
+    sp_indexed = (sp_y - sp_y.min()) / sp_span * 100 if sp_span > 0 else sp_y * 0
+    fig_drill.add_trace(go.Scatter(
+        x=sp_data["yr"], y=sp_indexed, mode="lines+markers", name=selected_label,
+        line=dict(color=TEXT_BLACK, width=2), customdata=sp_y,
+        hovertemplate=f"%{{x}}: %{{customdata:.0f}} counted<extra>{selected_label}</extra>",
+    ))
 for name in selected_covariates:
     x, y, color, unit, width = DRILLDOWN_COVARIATES[name]
     y = y.astype(float)
@@ -755,8 +757,11 @@ fig_drill.update_layout(
                 showgrid=True, gridcolor=GRID, linecolor=TEXT_BLACK, tickfont=dict(color=TEXT_BLACK)),
 )
 st.plotly_chart(fig_drill, use_container_width=True)
-sp_row = species_trend[species_trend["species_name"] == selected_species].iloc[0]
-st.caption(
-    f"{selected_label}: {sp_row['first_year']}-{sp_row['last_year']} ({sp_row['years_observed']} years "
-    f"observed), avg change {sp_row['trend_per_year']:+.2f}/year. " + SOURCE_NOTE
-)
+if selected_species is not None:
+    sp_row = species_trend[species_trend["species_name"] == selected_species].iloc[0]
+    st.caption(
+        f"{selected_label}: {sp_row['first_year']}-{sp_row['last_year']} ({sp_row['years_observed']} years "
+        f"observed), avg change {sp_row['trend_per_year']:+.2f}/year. " + SOURCE_NOTE
+    )
+else:
+    st.caption("No species selected -- showing covariates only. " + SOURCE_NOTE)
