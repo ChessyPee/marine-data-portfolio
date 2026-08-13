@@ -481,40 +481,69 @@ st.caption(
 
 # --- Does more canopy mean more fish biodiversity, continuously (not just 2 bins)? ---
 st.subheader("Canopy cover vs. fish species richness (every site-year, not just two bins)")
-biodiv_data = combined.dropna(subset=["canopy_pct", "fish_richness"]).copy()
-# Marker size also scales with biomass (not just color) -- area-proportional
-# (sqrt of value, not the raw value) so bigger numbers don't get visually
-# exaggerated; the two channels (size + color) reinforce the same variable
-# for a quicker read rather than encoding two different things.
-biomass_sqrt = biodiv_data["fish_biomass"].clip(lower=0) ** 0.5
-size_scaled = 6 + (biomass_sqrt / biomass_sqrt.max()) * 22
-fig_biodiv = go.Figure(go.Scatter(
-    x=biodiv_data["canopy_pct"], y=biodiv_data["fish_richness"], mode="markers",
-    marker=dict(color=biodiv_data["fish_biomass"], colorscale=[[0, "#cde2fb"], [1, "#0d366b"]],
-                 showscale=True, colorbar=dict(title="Biomass (g)", tickfont=dict(color=TEXT_BLACK)),
-                 size=size_scaled, opacity=0.6),
-    text=[f"{r.site_code}, {int(r.yr)}: {int(r.fish_biomass):,}g" for r in biodiv_data.itertuples()],
-    hoverinfo="text+x+y",
-))
-corr_biodiv = biodiv_data["canopy_pct"].corr(biodiv_data["fish_richness"])
+biodiv_full = combined.dropna(subset=["canopy_pct", "fish_richness", "fish_biomass"]).copy()
+biodiv_full["yr"] = biodiv_full["yr"].astype(int)
+all_sites_biodiv = sorted(biodiv_full["site_code"].unique())
+biodiv_yr_min, biodiv_yr_max = int(biodiv_full["yr"].min()), int(biodiv_full["yr"].max())
+
+bf1, bf2 = st.columns([2, 3])
+biodiv_sites = bf1.multiselect("Sites to show", all_sites_biodiv, default=all_sites_biodiv, key="biodiv_sites")
+biodiv_years = bf2.slider("Year range", biodiv_yr_min, biodiv_yr_max, (biodiv_yr_min, biodiv_yr_max), key="biodiv_years")
+
+biodiv_data = biodiv_full[
+    biodiv_full["site_code"].isin(biodiv_sites) & biodiv_full["yr"].between(*biodiv_years)
+].copy()
+
+# Color = site (was fish biomass on a pale-to-dark single-hue scale, which
+# read as "mostly pale" since most site-years have modest biomass) -- a
+# fixed categorical color per site is stronger throughout and lets you pick
+# a site out by color, not just by filtering it in/out. Biomass still shown,
+# via marker size (area-proportional, sqrt of value) rather than color, so
+# it isn't dropped, just moved to a channel that doesn't wash out.
+import plotly.colors as pcolors
+SITE_PALETTE = pcolors.qualitative.Dark24 + pcolors.qualitative.Light24
+site_color_map = {s: SITE_PALETTE[i % len(SITE_PALETTE)] for i, s in enumerate(all_sites_biodiv)}
+
+fig_biodiv = go.Figure()
+if len(biodiv_data):
+    biomass_sqrt = biodiv_data["fish_biomass"].clip(lower=0) ** 0.5
+    bmax = biomass_sqrt.max()
+    biodiv_data["marker_size"] = 6 + (biomass_sqrt / bmax * 22) if bmax > 0 else 8
+    for site in biodiv_sites:
+        d = biodiv_data[biodiv_data["site_code"] == site]
+        if d.empty:
+            continue
+        fig_biodiv.add_trace(go.Scatter(
+            x=d["canopy_pct"], y=d["fish_richness"], mode="markers", name=site,
+            marker=dict(color=site_color_map[site], size=d["marker_size"], opacity=0.8,
+                         line=dict(width=0.5, color="white")),
+            text=[f"{site}, {int(r.yr)}: {int(r.fish_biomass):,}g biomass" for r in d.itertuples()],
+            hoverinfo="text+x+y",
+        ))
+corr_biodiv = biodiv_data["canopy_pct"].corr(biodiv_data["fish_richness"]) if len(biodiv_data) > 1 else float("nan")
 fig_biodiv.update_layout(
-    height=500, font=dict(color=TEXT_BLACK), plot_bgcolor="#fcfcfb", paper_bgcolor="#fcfcfb",
+    height=550, font=dict(color=TEXT_BLACK), plot_bgcolor="#fcfcfb", paper_bgcolor="#fcfcfb",
     xaxis=dict(title=dict(text="Canopy cover (%)", font=dict(color=TEXT_BLACK)), showgrid=True,
                 gridcolor=GRID, linecolor=TEXT_BLACK, tickfont=dict(color=TEXT_BLACK)),
     yaxis=dict(title=dict(text="Fish species richness (count)", font=dict(color=TEXT_BLACK)),
                 showgrid=True, gridcolor=GRID, linecolor=TEXT_BLACK, tickfont=dict(color=TEXT_BLACK)),
+    legend=dict(title=dict(text="Site", font=dict(color=TEXT_BLACK)), font=dict(color=TEXT_BLACK),
+                 itemsizing="constant"),
 )
 st.plotly_chart(fig_biodiv, use_container_width=True)
-richness_dir = "negative" if corr_biodiv < 0 else "positive"
-st.caption(
-    f"n={len(biodiv_data)} site-years with both metrics. Correlation(canopy %, fish richness) = "
-    f"{corr_biodiv:+.3f} -- weak and {richness_dir}. This doesn't isolate canopy's effect from "
-    "confounds like depth, exposure, or region -- pooling all sites/years together captures *where "
-    "urchins and canopy tend to co-occur*, not *what happens at a site over time*, so treat this as "
-    "descriptive rather than causal. Point color = fish biomass at that site-year, so you "
-    "can also eyeball whether high-biomass points cluster anywhere on the canopy axis (they don't "
-    "obviously). " + SOURCE_NOTE
-)
+if len(biodiv_data):
+    richness_dir = "negative" if corr_biodiv < 0 else "positive"
+    st.caption(
+        f"n={len(biodiv_data)} site-years shown ({len(biodiv_sites)} site(s), {biodiv_years[0]}-{biodiv_years[1]}). "
+        f"Correlation(canopy %, fish richness) = {corr_biodiv:+.3f} -- weak and {richness_dir} over this "
+        "selection. Dot color = site (use the filters above to isolate one, or click a legend entry); dot "
+        "size = fish biomass at that site-year (bigger dot = more biomass). This doesn't isolate canopy's "
+        "effect from confounds like depth, exposure, or region -- pooling sites/years together captures "
+        "*where* urchins and canopy tend to co-occur, not *what happens at a site over time*, so treat "
+        "this as descriptive rather than causal. " + SOURCE_NOTE
+    )
+else:
+    st.info("No site-years match the current filters -- widen the site or year selection above.")
 
 # =====================================================================
 # Analysis 6: native vs. invasive urchin -- do they differ?
@@ -577,7 +606,7 @@ st.caption(
 # =====================================================================
 # Analysis 7 (bonus): which fish species are rising/falling
 # =====================================================================
-st.header("Which fish species are rising or falling over time?")
+st.header("Fish species trend: average change in count per year (top 10 rising, top 10 falling)")
 # Common names from general reference, not from the dataset (RLS only
 # provides scientific names) -- worth double-checking against a field
 # guide before quoting confidently in an interview.
