@@ -44,12 +44,11 @@ COLOR_TEMP = "#1f6fb2"
 COLOR_TEMP_FILL = "rgba(31,111,178,0.25)"
 COLOR_LOBSTER = "#8073ac"  # purple -- was reusing COLOR_SITES blue, which now clashes with sea temp's blue
 COLOR_NATIVE_URCHIN = "#c9a227"  # amber -- was teal, too close to canopy green
-# Pink -> red -> purple, for markers whose size ALSO encodes magnitude (the
-# sightings-by-year map): a linear light-to-dark ramp on skewed count data
-# (most site-years are small counts) reads as "everything is pale" -- this
-# still increases in saturation across the low range instead of holding pale
-# pink for most of the data.
-PINK_RED_PURPLE = [[0.0, "#f8a5c2"], [0.35, "#e0457b"], [0.65, "#c81d5e"], [1.0, "#6a0dad"]]
+# Blue -> purple -> red, for markers whose size ALSO encodes magnitude (the
+# sightings-by-year map): capped at the 90th percentile (not linear to the
+# raw max) so saturation still builds across the common low range instead of
+# holding one pale color for most of the data.
+BLUE_PURPLE_RED = [[0.0, "#3a6bc9"], [0.5, "#8b3fae"], [1.0, "#d1183a"]]
 TEXT_BLACK = "#000000"
 GRID = "#333333"
 
@@ -259,7 +258,7 @@ for yr in years_sorted:
         data=[go.Scattermapbox(
             lat=d["latitude"], lon=d["longitude"], mode="markers",
             marker=dict(size=anim_marker_size(d["count"]), color=d["count"],
-                         colorscale=PINK_RED_PURPLE, cmin=count_min, cmax=color_cap_sightings, showscale=True,
+                         colorscale=BLUE_PURPLE_RED, cmin=count_min, cmax=color_cap_sightings, showscale=True,
                          colorbar=dict(title="Count", tickfont=dict(color=TEXT_BLACK))),
             text=[f"{r.site_code}<br>Count: {int(r.count)}" for r in d.itertuples()],
             hoverinfo="text",
@@ -269,7 +268,7 @@ first = sightings[sightings["yr"] == years_sorted[0]]
 fig_anim.add_trace(go.Scattermapbox(
     lat=first["latitude"], lon=first["longitude"], mode="markers",
     marker=dict(size=anim_marker_size(first["count"]), color=first["count"],
-                 colorscale=PINK_RED_PURPLE, cmin=count_min, cmax=color_cap_sightings, showscale=True,
+                 colorscale=BLUE_PURPLE_RED, cmin=count_min, cmax=color_cap_sightings, showscale=True,
                  colorbar=dict(title="Count", tickfont=dict(color=TEXT_BLACK))),
     text=[f"{r.site_code}<br>Count: {int(r.count)}" for r in first.itertuples()],
     hoverinfo="text",
@@ -705,6 +704,7 @@ sp_data = species_yearly_full[species_yearly_full["species_name"] == selected_sp
 DRILLDOWN_COVARIATES = {
     "Canopy cover": (statewide["yr"], statewide["canopy_pct"], "#0d8a3e", "%", 2),
     "Invasive urchin count": (statewide["yr"], statewide["invasive_urchin"], "#a50f15", "", 2),
+    "Lobster count": (statewide["yr"], statewide["lobster"], COLOR_LOBSTER, "", 2),
     "Sea temp (mean)*": (temp["yr"], temp["mean_temp_c"], COLOR_TEMP, "°C", 2),
 }
 selected_covariates = st.multiselect(
@@ -718,7 +718,7 @@ sp_span = sp_y.max() - sp_y.min()
 sp_indexed = (sp_y - sp_y.min()) / sp_span * 100 if sp_span > 0 else sp_y * 0
 fig_drill.add_trace(go.Scatter(
     x=sp_data["yr"], y=sp_indexed, mode="lines+markers", name=selected_label,
-    line=dict(color="#c51b7d", width=4), customdata=sp_y,
+    line=dict(color=TEXT_BLACK, width=4), customdata=sp_y,
     hovertemplate=f"%{{x}}: %{{customdata:.0f}} counted<extra>{selected_label}</extra>",
 ))
 for name in selected_covariates:
