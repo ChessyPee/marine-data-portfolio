@@ -418,7 +418,8 @@ st.caption(
     "These metrics have different units (a count, a percent, °C) -- putting them on one raw axis "
     "would make a count of 20 and a percent of 20 look identical in height, which would misrepresent "
     "them. Instead each selected line is **indexed to 0-100** (its own min -> 0, its own max -> 100) "
-    "so shapes/timing are comparable -- hover over any point to see the real value and unit."
+    "so shapes/timing are comparable -- hover over any point to see the real value and unit. Sea temp "
+    "also shows its mean-p90 band (same as the other temperature charts in this dashboard)."
 )
 INDEX_SERIES = {
     "Invasive urchin count": (statewide["yr"], statewide["invasive_urchin"], "#a50f15", "", 4),
@@ -437,6 +438,26 @@ if selected_metrics:
     for name in selected_metrics:
         x, y, color, unit, width = INDEX_SERIES[name]
         y = y.astype(float)
+        if name == "Sea temp (mean)*":
+            # Index mean and p90 together, off their combined min/max (not
+            # mean's own min/max alone) -- so the shaded band is drawn to
+            # scale on this indexed axis too, matching the mean-p90 band
+            # shown everywhere else sea temp appears in this dashboard.
+            p90 = temp["p90_temp_c"].astype(float)
+            combo_min, combo_max = min(y.min(), p90.min()), max(y.max(), p90.max())
+            span = combo_max - combo_min
+            y_indexed = (y - combo_min) / span * 100 if span > 0 else y * 0
+            p90_indexed = (p90 - combo_min) / span * 100 if span > 0 else p90 * 0
+            fig_idx.add_trace(go.Scatter(x=x, y=p90_indexed, mode="lines", line=dict(width=0),
+                                           showlegend=False, hoverinfo="skip"))
+            fig_idx.add_trace(go.Scatter(x=x, y=y_indexed, mode="lines", line=dict(width=0),
+                                           fill="tonexty", fillcolor=COLOR_TEMP_FILL,
+                                           name="Sea temp mean-p90 band*", hoverinfo="skip"))
+            fig_idx.add_trace(go.Scatter(
+                x=x, y=y_indexed, mode="lines+markers", name=name, line=dict(color=color, width=width),
+                customdata=y, hovertemplate=f"%{{x}}: %{{customdata:.2f}}{unit}<extra>{name}</extra>",
+            ))
+            continue
         y_indexed = (y - y.min()) / (y.max() - y.min()) * 100 if y.max() > y.min() else y * 0
         fig_idx.add_trace(go.Scatter(
             x=x, y=y_indexed, mode="lines+markers", name=name, line=dict(color=color, width=width),
@@ -456,118 +477,6 @@ else:
 st.caption(
     "Tip: every chart's legend in this dashboard is also click-to-toggle (Plotly's built-in behavior) "
     "-- click a legend entry on any chart to hide/show that line without using this selector."
-)
-
-# =====================================================================
-# Analysis 3: canopy vs. urchin-density tier
-# =====================================================================
-st.header("Does canopy cover fall as invasive urchin density rises?")
-scatter_data = combined.dropna(subset=["canopy_pct"]).copy()
-scatter_data["yr"] = scatter_data["yr"].astype(int)
-# One trace per year (not a single trace colored by a continuous scale) so
-# the legend is click-to-toggle per year -- lets you isolate individual
-# years instead of only reading a colorbar. Colors sampled from the same
-# green->blue->red->purple "time" ramp used for first-detection year on the
-# map above, so year identity uses a consistent code across the dashboard.
-urchin_sqrt = scatter_data["invasive_urchin_count"].clip(lower=0) ** 0.5
-urchin_sqrt_max = urchin_sqrt.max() if urchin_sqrt.max() > 0 else 1
-scatter_data["marker_size"] = 7 + (urchin_sqrt / urchin_sqrt_max) * 28
-years_sc = sorted(scatter_data["yr"].unique())
-try:
-    import plotly.colors as pcolors
-    year_colors = pcolors.sample_colorscale(GBR, [i / max(len(years_sc) - 1, 1) for i in range(len(years_sc))])
-except Exception:
-    year_colors = [GBR[i % len(GBR)][1] for i in range(len(years_sc))]
-
-fig_scatter3 = go.Figure()
-for i, yr in enumerate(years_sc):
-    d = scatter_data[scatter_data["yr"] == yr]
-    fig_scatter3.add_trace(go.Scatter(
-        x=d["canopy_pct"], y=d["invasive_urchin_count"], mode="markers", name=str(yr),
-        marker=dict(color=year_colors[i], size=d["marker_size"], opacity=0.75,
-                     line=dict(width=0.5, color="white")),
-        text=[f"{r.site_code}, {yr}: {int(r.invasive_urchin_count)} urchins, {r.canopy_pct:.1f}% canopy"
-              for r in d.itertuples()],
-        hoverinfo="text",
-    ))
-fig_scatter3.update_layout(
-    height=550, font=dict(color=TEXT_BLACK), plot_bgcolor="#fcfcfb", paper_bgcolor="#fcfcfb",
-    xaxis=dict(title=dict(text="Canopy %", font=dict(color=TEXT_BLACK)), showgrid=True, gridcolor=GRID,
-                linecolor=TEXT_BLACK, tickfont=dict(color=TEXT_BLACK)),
-    yaxis=dict(title=dict(text="Invasive urchin count (that site-year)", font=dict(color=TEXT_BLACK)),
-                showgrid=True, gridcolor=GRID, linecolor=TEXT_BLACK, tickfont=dict(color=TEXT_BLACK)),
-    legend=dict(title=dict(text="Year<br>(click to<br>toggle)", font=dict(color=TEXT_BLACK)),
-                 font=dict(color=TEXT_BLACK), itemsizing="constant"),
-)
-st.plotly_chart(fig_scatter3, use_container_width=True)
-corr_canopy_urchin = scatter_data["invasive_urchin_count"].corr(scatter_data["canopy_pct"])
-st.caption(
-    f"n={len(scatter_data)} site-years with both metrics, {len(years_sc)} years ({years_sc[0]}-{years_sc[-1]}). "
-    f"Correlation(urchin count, canopy %) = {corr_canopy_urchin:+.3f}. Dot color = survey year (click a "
-    "year in the legend to isolate or hide it); dot size = that site-year's urchin count (bigger dot = "
-    "more urchins), so the two encode the same variable on two channels for a faster read. "
-    "**Counterintuitive result, stated plainly**: canopy doesn't fall as urchin count rises here -- the "
-    "correlation is weak and, if anything, in the opposite direction from the barren-formation "
-    "hypothesis. Most likely explanation: this pools all sites/years together, so it captures *where "
-    "urchins are* (kelp-rich reef, their preferred habitat) rather than *what urchins do to a site over "
-    "time*. Testing the actual barren-formation hypothesis needs a within-site, before/after "
-    "time-series (same site, canopy % before vs. after urchin arrival), not a pooled correlation "
-    "across different sites. " + SOURCE_NOTE
-)
-
-# =====================================================================
-# Analysis 4: fish community vs. canopy status
-# =====================================================================
-st.header("Fish community: low-canopy vs. healthy-canopy sites")
-CANOPY_CUTOFF = combined["canopy_pct"].quantile(0.25)
-fish_data = combined.dropna(subset=["canopy_pct", "fish_richness", "fish_count"]).copy()
-fish_data["status"] = fish_data["canopy_pct"].apply(lambda c: "low_canopy" if c < CANOPY_CUTOFF else "healthy")
-fish_summary = fish_data.groupby("status").agg(
-    n=("site_code", "count"), avg_richness=("fish_richness", "mean"),
-    avg_count=("fish_count", "mean"), avg_biomass=("fish_biomass", "mean"),
-).reindex(["low_canopy", "healthy"])
-fm1, fm2, fm3, fm4 = st.columns(4)
-fm1.metric("Low canopy: avg species richness", f"{fish_summary.loc['low_canopy','avg_richness']:.1f} types")
-fm2.metric("Healthy canopy: avg species richness", f"{fish_summary.loc['healthy','avg_richness']:.1f} types")
-fm3.metric("Low canopy: avg fish counted", f"{fish_summary.loc['low_canopy','avg_count']:.0f} fish")
-fm4.metric("Healthy canopy: avg fish counted", f"{fish_summary.loc['healthy','avg_count']:.0f} fish")
-
-# Richness (types of fish) vs. count (number of fish) together, per
-# site-year, colored by canopy status -- replaces two disconnected bar
-# charts (one per metric) that couldn't show whether a site with more
-# *kinds* of fish also had more *fish*, which is the actually interesting
-# question here.
-fig_fish = go.Figure()
-for status, color, label in [("low_canopy", "#eb6834", "Low canopy (<25th pct)"),
-                               ("healthy", "#1a9850", "Healthy canopy")]:
-    d = fish_data[fish_data["status"] == status]
-    fig_fish.add_trace(go.Scatter(
-        x=d["fish_richness"], y=d["fish_count"], mode="markers", name=label,
-        marker=dict(color=color, size=9, opacity=0.6),
-        text=[f"{r.site_code}, {int(r.yr)}: {int(r.fish_richness)} species, {int(r.fish_count)} fish counted"
-              for r in d.itertuples()],
-        hoverinfo="text",
-    ))
-fig_fish.update_layout(
-    height=500, font=dict(color=TEXT_BLACK), plot_bgcolor="#fcfcfb", paper_bgcolor="#fcfcfb",
-    xaxis=dict(title=dict(text="Fish species richness (types observed)", font=dict(color=TEXT_BLACK)),
-                showgrid=True, gridcolor=GRID, linecolor=TEXT_BLACK, tickfont=dict(color=TEXT_BLACK)),
-    yaxis=dict(title=dict(text="Fish counted (number of individuals)", font=dict(color=TEXT_BLACK)),
-                showgrid=True, gridcolor=GRID, linecolor=TEXT_BLACK, tickfont=dict(color=TEXT_BLACK)),
-    legend=dict(font=dict(color=TEXT_BLACK), orientation="h", y=1.08),
-)
-st.plotly_chart(fig_fish, use_container_width=True)
-corr_rich_count = fish_data["fish_richness"].corr(fish_data["fish_count"])
-st.caption(
-    f"'Low canopy' = canopy % below the real 25th percentile ({CANOPY_CUTOFF:.1f}%), not a guessed "
-    "threshold -- true near-zero barrens (<5% canopy) are rare in this dataset (17 site-years total), "
-    f"too few to compare on their own. n={int(fish_summary.loc['low_canopy','n'])} low_canopy, "
-    f"n={int(fish_summary.loc['healthy','n'])} healthy. Each dot is one site-year: x = how many different "
-    "fish species were seen, y = how many individual fish were counted in total -- correlation between "
-    f"the two is {corr_rich_count:+.3f} (more species tends to come with more fish, unsurprisingly). "
-    "Consistent with the Analysis-3 finding: richness and count are both *higher*, not lower, at "
-    "low-canopy sites here -- again likely a where-urchins-are-vs-what-they-do confound, not evidence "
-    "that barrens help fish. " + SOURCE_NOTE
 )
 
 # --- Does more canopy mean more fish biodiversity, continuously (not just 2 bins)? ---
@@ -599,10 +508,10 @@ st.plotly_chart(fig_biodiv, use_container_width=True)
 richness_dir = "negative" if corr_biodiv < 0 else "positive"
 st.caption(
     f"n={len(biodiv_data)} site-years with both metrics. Correlation(canopy %, fish richness) = "
-    f"{corr_biodiv:+.3f} -- weak and {richness_dir}, consistent with the low-canopy-vs-healthy bar "
-    "chart above (this is the same relationship shown continuously across every site-year instead of "
-    "collapsed into two bins). Same caveat applies: this doesn't isolate canopy's effect from "
-    "confounds like depth, exposure, or region. Point color = fish biomass at that site-year, so you "
+    f"{corr_biodiv:+.3f} -- weak and {richness_dir}. This doesn't isolate canopy's effect from "
+    "confounds like depth, exposure, or region -- pooling all sites/years together captures *where "
+    "urchins and canopy tend to co-occur*, not *what happens at a site over time*, so treat this as "
+    "descriptive rather than causal. Point color = fish biomass at that site-year, so you "
     "can also eyeball whether high-biomass points cluster anywhere on the canopy axis (they don't "
     "obviously). " + SOURCE_NOTE
 )
@@ -622,8 +531,8 @@ st.caption(
     "urchin count correlates weakly *positively* with canopy (again, likely reflecting where urchins "
     "are found rather than their impact), native urchin count weakly *negatively*. Neither is strong "
     "enough to call a real finding on its own; the honest takeaway is that a pooled correlation like "
-    "this can't distinguish habitat preference from ecological impact -- see the Analysis-3 caveat "
-    "above. " + SOURCE_NOTE
+    "this can't distinguish habitat preference from ecological impact -- it captures where these "
+    "species are found, not what they do to a site over time. " + SOURCE_NOTE
 )
 
 # =====================================================================
