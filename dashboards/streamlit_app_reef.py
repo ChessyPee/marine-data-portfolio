@@ -134,11 +134,28 @@ def load_data():
         """,
         engine,
     )
-    return detections, colonized, extent, temp, sightings, statewide, combined, lag, species_trend
+    species_yearly_full = pd.read_sql(
+        """
+        WITH species_yearly AS (
+            SELECT species_name, EXTRACT(YEAR FROM survey_date)::int AS yr, SUM(total) AS total_count
+            FROM rls_clean_fish GROUP BY species_name, EXTRACT(YEAR FROM survey_date)::int
+        ),
+        qualifying AS (
+            SELECT species_name FROM species_yearly GROUP BY species_name HAVING COUNT(*) >= 10
+        )
+        SELECT sy.species_name, sy.yr, sy.total_count
+        FROM species_yearly sy JOIN qualifying q ON q.species_name = sy.species_name
+        ORDER BY sy.species_name, sy.yr
+        """,
+        engine,
+    )
+    return (detections, colonized, extent, temp, sightings, statewide, combined, lag, species_trend,
+             species_yearly_full)
 
 
 try:
-    detections, colonized, extent, temp, sightings, statewide, combined, lag, species_trend = load_data()
+    (detections, colonized, extent, temp, sightings, statewide, combined, lag, species_trend,
+      species_yearly_full) = load_data()
 except Exception as e:
     st.error(
         "Couldn't reach the database. Check that DATABASE_URL / DB_* are set "
@@ -664,4 +681,82 @@ st.caption(
     "trend, not controlled for survey effort changes over time -- a real trend, but treat the exact "
     "slope as indicative, not precise. Common names are from general reference (not in the source "
     "dataset) -- verify before quoting. " + SOURCE_NOTE
+)
+
+# --- Drill-down: does one species' actual trend line up with a covariate? ---
+st.subheader("Explore a species: what moved alongside it?")
+st.caption(
+    "Pick one of the species above to see its own yearly count, indexed 0-100, next to canopy cover "
+    "and invasive urchin count (both scoped to the 25 near-Maria-Island sites) and real sea temperature "
+    "(2018-2026 only). **Scopes don't fully match**: this species' trend is statewide across its full "
+    "observed period, canopy/urchin are near-MI only, and temp is a short recent window -- so treat any "
+    "visual overlap as a lead worth checking, not proof of cause. Same indexing approach as the "
+    "\"Explore\" chart above: each line is scaled to its own min/max so shapes are comparable, hover for "
+    "real values."
+)
+species_pool = pd.concat([top_rising, top_falling])[["species_name", "label"]].drop_duplicates()
+species_choices = dict(zip(species_pool["label"], species_pool["species_name"]))
+default_label = top_rising["label"].iloc[-1] if len(top_rising) else list(species_choices.keys())[0]
+selected_label = st.selectbox("Species", list(species_choices.keys()),
+                                index=list(species_choices.keys()).index(default_label))
+selected_species = species_choices[selected_label]
+sp_data = species_yearly_full[species_yearly_full["species_name"] == selected_species].sort_values("yr")
+
+DRILLDOWN_COVARIATES = {
+    "Canopy cover": (statewide["yr"], statewide["canopy_pct"], "#0d8a3e", "%", 2),
+    "Invasive urchin count": (statewide["yr"], statewide["invasive_urchin"], "#a50f15", "", 2),
+    "Sea temp (mean)*": (temp["yr"], temp["mean_temp_c"], COLOR_TEMP, "°C", 2),
+}
+selected_covariates = st.multiselect(
+    "Compare against", list(DRILLDOWN_COVARIATES.keys()),
+    default=["Canopy cover", "Invasive urchin count"], key="drilldown_covariates",
+)
+
+fig_drill = go.Figure()
+sp_y = sp_data["total_count"].astype(float)
+sp_span = sp_y.max() - sp_y.min()
+sp_indexed = (sp_y - sp_y.min()) / sp_span * 100 if sp_span > 0 else sp_y * 0
+fig_drill.add_trace(go.Scatter(
+    x=sp_data["yr"], y=sp_indexed, mode="lines+markers", name=selected_label,
+    line=dict(color="#c51b7d", width=4), customdata=sp_y,
+    hovertemplate=f"%{{x}}: %{{customdata:.0f}} counted<extra>{selected_label}</extra>",
+))
+for name in selected_covariates:
+    x, y, color, unit, width = DRILLDOWN_COVARIATES[name]
+    y = y.astype(float)
+    if name == "Sea temp (mean)*":
+        p90 = temp["p90_temp_c"].astype(float)
+        combo_min, combo_max = min(y.min(), p90.min()), max(y.max(), p90.max())
+        span = combo_max - combo_min
+        y_indexed = (y - combo_min) / span * 100 if span > 0 else y * 0
+        p90_indexed = (p90 - combo_min) / span * 100 if span > 0 else p90 * 0
+        fig_drill.add_trace(go.Scatter(x=x, y=p90_indexed, mode="lines", line=dict(width=0),
+                                         showlegend=False, hoverinfo="skip"))
+        fig_drill.add_trace(go.Scatter(x=x, y=y_indexed, mode="lines", line=dict(width=0),
+                                         fill="tonexty", fillcolor=COLOR_TEMP_FILL,
+                                         name="Sea temp mean-p90 band*", hoverinfo="skip"))
+        fig_drill.add_trace(go.Scatter(
+            x=x, y=y_indexed, mode="lines+markers", name=name, line=dict(color=color, width=width),
+            customdata=y, hovertemplate=f"%{{x}}: %{{customdata:.2f}}{unit}<extra>{name}</extra>",
+        ))
+        continue
+    span = y.max() - y.min()
+    y_indexed = (y - y.min()) / span * 100 if span > 0 else y * 0
+    fig_drill.add_trace(go.Scatter(
+        x=x, y=y_indexed, mode="lines+markers", name=name, line=dict(color=color, width=width),
+        customdata=y, hovertemplate=f"%{{x}}: %{{customdata:.1f}}{unit}<extra>{name}</extra>",
+    ))
+fig_drill.update_layout(
+    height=500, font=dict(color=TEXT_BLACK), plot_bgcolor="#fcfcfb", paper_bgcolor="#fcfcfb",
+    legend=dict(font=dict(color=TEXT_BLACK), orientation="h", y=1.1),
+    xaxis=dict(title=dict(text="Year", font=dict(color=TEXT_BLACK)), showgrid=True, gridcolor=GRID,
+                linecolor=TEXT_BLACK, tickfont=dict(color=TEXT_BLACK), dtick=2),
+    yaxis=dict(title=dict(text="Indexed (0-100, own min-max)", font=dict(color=TEXT_BLACK)),
+                showgrid=True, gridcolor=GRID, linecolor=TEXT_BLACK, tickfont=dict(color=TEXT_BLACK)),
+)
+st.plotly_chart(fig_drill, use_container_width=True)
+sp_row = species_trend[species_trend["species_name"] == selected_species].iloc[0]
+st.caption(
+    f"{selected_label}: {sp_row['first_year']}-{sp_row['last_year']} ({sp_row['years_observed']} years "
+    f"observed), avg change {sp_row['trend_per_year']:+.2f}/year. " + SOURCE_NOTE
 )
