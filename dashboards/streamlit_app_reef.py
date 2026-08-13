@@ -105,9 +105,18 @@ def load_data():
         WITH species_yearly AS (
             SELECT species_name, EXTRACT(YEAR FROM survey_date)::int AS yr, SUM(total) AS total_count
             FROM rls_clean_fish GROUP BY species_name, EXTRACT(YEAR FROM survey_date)::int
+        ),
+        bounds AS (
+            SELECT species_name, MIN(yr) AS first_year, MAX(yr) AS last_year,
+                   COUNT(*) AS years_observed, REGR_SLOPE(total_count, yr) AS trend_per_year
+            FROM species_yearly GROUP BY species_name HAVING COUNT(*) >= 10
         )
-        SELECT species_name, REGR_SLOPE(total_count, yr) AS trend_per_year, COUNT(*) AS years_observed
-        FROM species_yearly GROUP BY species_name HAVING COUNT(*) >= 10 ORDER BY trend_per_year DESC
+        SELECT b.species_name, b.trend_per_year, b.years_observed, b.first_year, b.last_year,
+               fy.total_count AS first_count, ly.total_count AS last_count
+        FROM bounds b
+        JOIN species_yearly fy ON fy.species_name = b.species_name AND fy.yr = b.first_year
+        JOIN species_yearly ly ON ly.species_name = b.species_name AND ly.yr = b.last_year
+        ORDER BY b.trend_per_year DESC
         """,
         engine,
     )
@@ -325,11 +334,10 @@ st.caption(
 # =====================================================================
 st.header("Trend near Maria Island: urchin, canopy, and predators vs. sea temperature")
 MI_SITES_NOTE = (
-    "MIR-S1, S2, S3, S5, S7, S8, S9, S10, S11, S12 -- the 10 nearest Maria Island Reserve sites among "
-    "the 12 with the densest survey history (39-43 surveys each, 1992-2026), 14-23km from the Maria "
-    "Island NRS mooring (the 2 farthest of the 12 dropped to keep this a tight local comparison). "
-    "Restricted from statewide to these specific nearby sites so the temperature overlay is a "
-    "genuinely local comparison, not a state-scale stretch."
+    "The 25 sites nearest the Maria Island NRS mooring (<=23.2km, profiled directly against real site "
+    "coordinates) -- a mix of 12 densely-surveyed Maria Island Reserve (MIR-*) sites and 13 sparser "
+    "nearby points (TAS-coded). Restricted from statewide to these specific nearby sites so the "
+    "temperature overlay is a genuinely local comparison, not a state-scale stretch."
 )
 fig_sw = make_subplots(
     rows=3, cols=1, shared_xaxes=True, vertical_spacing=0.08,
@@ -350,10 +358,11 @@ for row in (1, 2, 3):
                                   line=dict(color=COLOR_TEMP, width=2, dash="dot"), name="Sea temp (mean)*",
                                   legendgroup="temp", showlegend=(row == 1)), row=row, col=1, secondary_y=True)
 fig_sw.add_trace(go.Scatter(x=statewide["yr"], y=statewide["invasive_urchin"], mode="lines+markers",
-                              line=dict(color="#a50f15", width=2), name="Invasive urchin"),
+                              line=dict(color="#a50f15", width=4), marker=dict(size=8),
+                              name="Invasive urchin"),
                    row=1, col=1, secondary_y=False)
 fig_sw.add_trace(go.Scatter(x=statewide["yr"], y=statewide["canopy_pct"], mode="lines+markers",
-                              line=dict(color="#2a78d6", width=2), name="Canopy %"),
+                              line=dict(color="#0d8a3e", width=2), name="Canopy %"),
                    row=2, col=1, secondary_y=False)
 fig_sw.add_trace(go.Scatter(x=statewide["yr"], y=statewide["lobster"], mode="lines+markers",
                               line=dict(color=COLOR_SITES, width=2), name="Lobster"),
@@ -387,12 +396,12 @@ st.caption(
     "so shapes/timing are comparable -- hover over any point to see the real value and unit."
 )
 INDEX_SERIES = {
-    "Invasive urchin count": (statewide["yr"], statewide["invasive_urchin"], "#a50f15", ""),
-    "Native urchin count": (statewide["yr"], statewide["native_urchin"], "#66c2a5", ""),
-    "Canopy cover": (statewide["yr"], statewide["canopy_pct"], "#2a78d6", "%"),
-    "Lobster count": (statewide["yr"], statewide["lobster"], COLOR_SITES, ""),
-    "Abalone count": (statewide["yr"], statewide["abalone"], COLOR_EXTENT, ""),
-    "Sea temp (mean)*": (temp["yr"], temp["mean_temp_c"], COLOR_TEMP, "°C"),
+    "Invasive urchin count": (statewide["yr"], statewide["invasive_urchin"], "#a50f15", "", 4),
+    "Native urchin count": (statewide["yr"], statewide["native_urchin"], "#66c2a5", "", 2),
+    "Canopy cover": (statewide["yr"], statewide["canopy_pct"], "#0d8a3e", "%", 2),
+    "Lobster count": (statewide["yr"], statewide["lobster"], COLOR_SITES, "", 2),
+    "Abalone count": (statewide["yr"], statewide["abalone"], COLOR_EXTENT, "", 2),
+    "Sea temp (mean)*": (temp["yr"], temp["mean_temp_c"], COLOR_TEMP, "°C", 2),
 }
 selected_metrics = st.multiselect(
     "Metrics to show", list(INDEX_SERIES.keys()),
@@ -401,11 +410,11 @@ selected_metrics = st.multiselect(
 if selected_metrics:
     fig_idx = go.Figure()
     for name in selected_metrics:
-        x, y, color, unit = INDEX_SERIES[name]
+        x, y, color, unit, width = INDEX_SERIES[name]
         y = y.astype(float)
         y_indexed = (y - y.min()) / (y.max() - y.min()) * 100 if y.max() > y.min() else y * 0
         fig_idx.add_trace(go.Scatter(
-            x=x, y=y_indexed, mode="lines+markers", name=name, line=dict(color=color, width=2),
+            x=x, y=y_indexed, mode="lines+markers", name=name, line=dict(color=color, width=width),
             customdata=y, hovertemplate=f"%{{x}}: %{{customdata:.1f}}{unit}<extra>{name}</extra>",
         ))
     fig_idx.update_layout(
@@ -428,38 +437,43 @@ st.caption(
 # Analysis 3: canopy vs. urchin-density tier
 # =====================================================================
 st.header("Does canopy cover fall as invasive urchin density rises?")
-tier_order = ["none", "low", "medium", "high"]
-combined = combined.copy()
-combined["urchin_density_tier"] = pd.cut(
-    combined["invasive_urchin_count"], bins=[-0.1, 0, 5, 20, combined["invasive_urchin_count"].max()],
-    labels=tier_order,
-)
-box_data = combined.dropna(subset=["canopy_pct"])
-fig_box = go.Figure()
-for tier, color in zip(tier_order, ["#1a9850", "#66c2a5", "#eb6834", "#a50f15"]):
-    d = box_data[box_data["urchin_density_tier"] == tier]
-    fig_box.add_trace(go.Box(y=d["canopy_pct"], name=tier, marker=dict(color=color), boxmean=True))
-fig_box.update_layout(
+scatter_data = combined.dropna(subset=["canopy_pct"]).copy()
+# Color scale capped at the 95th percentile, not the raw max -- a few
+# extreme outlier counts (up to 453) would otherwise wash out every
+# other point as "green" on a linear scale. Capping is noted in the
+# caption, not hidden.
+color_cap = scatter_data["invasive_urchin_count"].quantile(0.95)
+fig_scatter3 = go.Figure(go.Scatter(
+    x=scatter_data["invasive_urchin_count"], y=scatter_data["canopy_pct"], mode="markers",
+    marker=dict(
+        color=scatter_data["invasive_urchin_count"], colorscale=[[0, "#1a9850"], [1, "#a50f15"]],
+        cmin=0, cmax=color_cap, showscale=True,
+        colorbar=dict(title="Invasive<br>urchin count", tickfont=dict(color=TEXT_BLACK)),
+        size=8, opacity=0.65,
+    ),
+    text=[f"{r.site_code}, {int(r.yr)}: {int(r.invasive_urchin_count)} urchins" for r in scatter_data.itertuples()],
+    hoverinfo="text+y",
+))
+fig_scatter3.update_layout(
     height=500, font=dict(color=TEXT_BLACK), plot_bgcolor="#fcfcfb", paper_bgcolor="#fcfcfb",
-    yaxis=dict(title=dict(text="Canopy %", font=dict(color=TEXT_BLACK)), gridcolor=GRID,
+    yaxis=dict(title=dict(text="Canopy %", font=dict(color=TEXT_BLACK)), showgrid=True, gridcolor=GRID,
                 linecolor=TEXT_BLACK, tickfont=dict(color=TEXT_BLACK)),
-    xaxis=dict(title=dict(text="Invasive urchin density tier (real quartile-based cutoffs: 0 / 1-5 / 6-20 / 21+)",
-                            font=dict(color=TEXT_BLACK)),
-                linecolor=TEXT_BLACK, tickfont=dict(color=TEXT_BLACK)),
-    showlegend=False,
+    xaxis=dict(title=dict(text="Invasive urchin count (that site-year)", font=dict(color=TEXT_BLACK)),
+                showgrid=True, gridcolor=GRID, linecolor=TEXT_BLACK, tickfont=dict(color=TEXT_BLACK)),
 )
-st.plotly_chart(fig_box, use_container_width=True)
-avg_by_tier = box_data.groupby("urchin_density_tier", observed=True)["canopy_pct"].mean().reindex(tier_order)
+st.plotly_chart(fig_scatter3, use_container_width=True)
+corr_canopy_urchin = scatter_data["invasive_urchin_count"].corr(scatter_data["canopy_pct"])
 st.caption(
-    f"n={len(box_data)} site-years with both metrics. Mean canopy % by tier: "
-    + ", ".join(f"{t}={v:.1f}%" for t, v in avg_by_tier.items()) + ". "
-    "**Counterintuitive result, stated plainly**: canopy is *higher*, not lower, at high-urchin-density "
-    "sites in this pooled cross-sectional view -- the opposite of the barren-formation hypothesis. Most "
-    "likely explanation: this pools all sites/years together, so it captures *where urchins are* "
-    "(kelp-rich reef, their preferred habitat) rather than *what urchins do to a site over time*. "
-    "Testing the actual barren-formation hypothesis needs a within-site, before/after time-series "
-    "(same site, canopy % before vs. after urchin arrival), not a pooled correlation across different "
-    "sites. " + SOURCE_NOTE
+    f"n={len(scatter_data)} site-years with both metrics. Correlation(urchin count, canopy %) = "
+    f"{corr_canopy_urchin:+.3f}. Color scale capped at the 95th percentile ({color_cap:.0f} urchins) so "
+    "a handful of extreme counts (up to 453) don't wash out every other point as green. "
+    "**Counterintuitive result, stated plainly**: canopy doesn't fall as urchin count rises here -- the "
+    "correlation is weak and, if anything, in the opposite direction from the barren-formation "
+    "hypothesis. Most likely explanation: this pools all sites/years together, so it captures *where "
+    "urchins are* (kelp-rich reef, their preferred habitat) rather than *what urchins do to a site over "
+    "time*. Testing the actual barren-formation hypothesis needs a within-site, before/after "
+    "time-series (same site, canopy % before vs. after urchin arrival), not a pooled correlation "
+    "across different sites. " + SOURCE_NOTE
 )
 
 # =====================================================================
@@ -498,13 +512,20 @@ st.caption(
 
 # --- Does more canopy mean more fish biodiversity, continuously (not just 2 bins)? ---
 st.subheader("Canopy cover vs. fish species richness (every site-year, not just two bins)")
-biodiv_data = combined.dropna(subset=["canopy_pct", "fish_richness"])
+biodiv_data = combined.dropna(subset=["canopy_pct", "fish_richness"]).copy()
+# Marker size also scales with biomass (not just color) -- area-proportional
+# (sqrt of value, not the raw value) so bigger numbers don't get visually
+# exaggerated; the two channels (size + color) reinforce the same variable
+# for a quicker read rather than encoding two different things.
+biomass_sqrt = biodiv_data["fish_biomass"].clip(lower=0) ** 0.5
+size_scaled = 6 + (biomass_sqrt / biomass_sqrt.max()) * 22
 fig_biodiv = go.Figure(go.Scatter(
     x=biodiv_data["canopy_pct"], y=biodiv_data["fish_richness"], mode="markers",
     marker=dict(color=biodiv_data["fish_biomass"], colorscale=[[0, "#cde2fb"], [1, "#0d366b"]],
                  showscale=True, colorbar=dict(title="Biomass (g)", tickfont=dict(color=TEXT_BLACK)),
-                 size=7, opacity=0.65),
-    text=[f"{r.site_code}, {int(r.yr)}" for r in biodiv_data.itertuples()], hoverinfo="text+x+y",
+                 size=size_scaled, opacity=0.6),
+    text=[f"{r.site_code}, {int(r.yr)}: {int(r.fish_biomass):,}g" for r in biodiv_data.itertuples()],
+    hoverinfo="text+x+y",
 ))
 corr_biodiv = biodiv_data["canopy_pct"].corr(biodiv_data["fish_richness"])
 fig_biodiv.update_layout(
@@ -550,27 +571,38 @@ st.caption(
 # =====================================================================
 st.header("Predator check: does last year's lobster count predict this year's urchin count?")
 lag_data = lag.dropna(subset=["lobster_prev_year"]).copy()
-fig_lag = go.Figure(go.Scatter(
-    x=lag_data["lobster_prev_year"], y=lag_data["urchin"], mode="markers",
-    marker=dict(color=lag_data["yr"], colorscale=GBR, showscale=True,
-                 colorbar=dict(title="Year", tickfont=dict(color=TEXT_BLACK)), size=6, opacity=0.6),
-    text=[f"{r.site_code}, {r.yr}" for r in lag_data.itertuples()], hoverinfo="text",
-))
+# The raw scatter (1290 overlapping points, both heavily skewed toward
+# small values with a long tail to 126/453) was hard to read -- switched
+# to the same "bin into real-quartile tiers, box plot per tier" pattern
+# used for the canopy-vs-urchin-tier chart, which reads much more
+# clearly for "is there a trend across groups" than a scatter cloud does.
+lobster_tier_order = ["none", "low", "medium", "high"]
+lag_data["lobster_tier"] = pd.cut(
+    lag_data["lobster_prev_year"], bins=[-0.1, 0, 3, 9, lag_data["lobster_prev_year"].max()],
+    labels=lobster_tier_order,
+)
+fig_lag = go.Figure()
+for tier, color in zip(lobster_tier_order, ["#1a9850", "#66c2a5", "#eb6834", "#a50f15"]):
+    d = lag_data[lag_data["lobster_tier"] == tier]
+    fig_lag.add_trace(go.Box(y=d["urchin"], name=tier, marker=dict(color=color), boxmean=True))
 fig_lag.update_layout(
     height=500, font=dict(color=TEXT_BLACK), plot_bgcolor="#fcfcfb", paper_bgcolor="#fcfcfb",
-    xaxis=dict(title=dict(text="Lobster count, previous year (same site)", font=dict(color=TEXT_BLACK)),
-                gridcolor=GRID, linecolor=TEXT_BLACK, tickfont=dict(color=TEXT_BLACK)),
     yaxis=dict(title=dict(text="Invasive urchin count, this year", font=dict(color=TEXT_BLACK)),
-                gridcolor=GRID, linecolor=TEXT_BLACK, tickfont=dict(color=TEXT_BLACK)),
+                showgrid=True, gridcolor=GRID, linecolor=TEXT_BLACK, tickfont=dict(color=TEXT_BLACK)),
+    xaxis=dict(title=dict(text="Lobster count last year, same site (real quartile tiers: 0 / 1-3 / 4-9 / 10+)",
+                            font=dict(color=TEXT_BLACK)), linecolor=TEXT_BLACK, tickfont=dict(color=TEXT_BLACK)),
+    showlegend=False,
 )
 st.plotly_chart(fig_lag, use_container_width=True)
 corr_lag = lag_data["lobster_prev_year"].corr(lag_data["urchin"])
+avg_by_lobster_tier = lag_data.groupby("lobster_tier", observed=True)["urchin"].mean().reindex(lobster_tier_order)
 st.caption(
-    f"n={len(lag_data)} site-year pairs. Correlation: {corr_lag:+.3f} -- essentially zero. No evidence "
-    "in this pooled data that more lobsters last year predicts fewer urchins this year (the biocontrol "
-    "hypothesis). This doesn't rule out a real effect (lobster predation on urchins is documented at "
-    "the individual-animal level), but if it's happening at a scale that shows up in site-level RLS "
-    "counts, this simple lag correlation isn't detecting it. " + SOURCE_NOTE
+    f"n={len(lag_data)} site-year pairs. Correlation: {corr_lag:+.3f} -- essentially zero. Mean urchin "
+    "count by lobster tier: " + ", ".join(f"{t}={v:.1f}" for t, v in avg_by_lobster_tier.items()) + ". "
+    "No evidence in this pooled data that more lobsters last year predicts fewer urchins this year (the "
+    "biocontrol hypothesis) -- the tiers look flat, not descending. This doesn't rule out a real effect "
+    "(lobster predation on urchins is documented at the individual-animal level), but if it's happening "
+    "at a scale that shows up in site-level RLS counts, this lag comparison isn't detecting it. " + SOURCE_NOTE
 )
 
 # =====================================================================
@@ -600,14 +632,24 @@ top_rising = species_trend.head(10).sort_values("trend_per_year").copy()
 top_falling = species_trend.tail(10).sort_values("trend_per_year").copy()
 top_rising["label"] = top_rising["species_name"].apply(display_name)
 top_falling["label"] = top_falling["species_name"].apply(display_name)
+def species_hover(df):
+    return [
+        f"{r.label}<br>{r.first_year}: {int(r.first_count)} counted<br>{r.last_year}: {int(r.last_count)} "
+        f"counted<br>Avg change: {r.trend_per_year:+.2f}/year over {r.years_observed} years observed"
+        for r in df.itertuples()
+    ]
+
 fig_species = go.Figure()
 fig_species.add_trace(go.Bar(y=top_rising["label"], x=top_rising["trend_per_year"],
-                               orientation="h", marker=dict(color="#1a9850"), name="Rising"))
+                               orientation="h", marker=dict(color="#1a9850"), name="Rising",
+                               hovertext=species_hover(top_rising), hoverinfo="text"))
 fig_species.add_trace(go.Bar(y=top_falling["label"], x=top_falling["trend_per_year"],
-                               orientation="h", marker=dict(color="#a50f15"), name="Falling"))
+                               orientation="h", marker=dict(color="#a50f15"), name="Falling",
+                               hovertext=species_hover(top_falling), hoverinfo="text"))
 fig_species.update_layout(
     height=600, font=dict(color=TEXT_BLACK), plot_bgcolor="#fcfcfb", paper_bgcolor="#fcfcfb",
-    xaxis=dict(title=dict(text="Change in count per year  (right of 0 = rising, left of 0 = falling)",
+    xaxis=dict(title=dict(text="Avg change in count per year, across the full period observed "
+                                "(right of 0 = rising, left of 0 = falling)",
                             font=dict(color=TEXT_BLACK)), gridcolor=GRID, zerolinecolor=TEXT_BLACK,
                 zerolinewidth=2, linecolor=TEXT_BLACK, tickfont=dict(color=TEXT_BLACK)),
     yaxis=dict(linecolor=TEXT_BLACK, tickfont=dict(color=TEXT_BLACK)),
@@ -616,9 +658,12 @@ fig_species.update_layout(
 st.plotly_chart(fig_species, use_container_width=True)
 st.caption(
     f"Top 10 rising and top 10 falling fish species by linear trend (species observed in >=10 distinct "
-    f"years only, {species_trend['species_name'].nunique()} species qualify). The x-axis is a **rate of "
-    "change** (count/year), not a year -- 0 means no change, bars extend right for species increasing "
-    "and left for species decreasing. Raw count trend, not controlled for survey effort changes over "
-    "time -- a real trend, but treat the exact slope as indicative, not precise. Common names are from "
-    "general reference (not in the source dataset) -- verify before quoting. " + SOURCE_NOTE
+    f"years only, {species_trend['species_name'].nunique()} species qualify). **This is not a single "
+    "year's change** -- it's the average yearly rate of change across that species' *entire* observed "
+    "period (different species were first/last seen in different years; hover over a bar to see the "
+    "actual first-year count, last-year count, and how many years that species was observed). 0 means "
+    "no change; bars extend right for species increasing and left for species decreasing. Raw count "
+    "trend, not controlled for survey effort changes over time -- a real trend, but treat the exact "
+    "slope as indicative, not precise. Common names are from general reference (not in the source "
+    "dataset) -- verify before quoting. " + SOURCE_NOTE
 )
