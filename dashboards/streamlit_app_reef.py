@@ -479,6 +479,45 @@ st.caption(
     "-- click a legend entry on any chart to hide/show that line without using this selector."
 )
 
+# =====================================================================
+# Analysis 5 (bonus): predator (lobster) vs. invasive urchin, with lag
+# =====================================================================
+st.header("Predator check: does last year's lobster count predict this year's urchin count?")
+lag_data = lag.dropna(subset=["lobster_prev_year"]).copy()
+# The raw scatter (1290 overlapping points, both heavily skewed toward
+# small values with a long tail to 126/453) was hard to read -- switched
+# to the same "bin into real-quartile tiers, box plot per tier" pattern
+# used for the canopy-vs-urchin-tier chart, which reads much more
+# clearly for "is there a trend across groups" than a scatter cloud does.
+lobster_tier_order = ["none", "low", "medium", "high"]
+lag_data["lobster_tier"] = pd.cut(
+    lag_data["lobster_prev_year"], bins=[-0.1, 0, 3, 9, lag_data["lobster_prev_year"].max()],
+    labels=lobster_tier_order,
+)
+fig_lag = go.Figure()
+for tier, color in zip(lobster_tier_order, ["#1a9850", "#66c2a5", "#eb6834", "#a50f15"]):
+    d = lag_data[lag_data["lobster_tier"] == tier]
+    fig_lag.add_trace(go.Box(y=d["urchin"], name=tier, marker=dict(color=color), boxmean=True))
+fig_lag.update_layout(
+    height=500, font=dict(color=TEXT_BLACK), plot_bgcolor="#fcfcfb", paper_bgcolor="#fcfcfb",
+    yaxis=dict(title=dict(text="Invasive urchin count, this year", font=dict(color=TEXT_BLACK)),
+                showgrid=True, gridcolor=GRID, linecolor=TEXT_BLACK, tickfont=dict(color=TEXT_BLACK)),
+    xaxis=dict(title=dict(text="Lobster count last year, same site (real quartile tiers: 0 / 1-3 / 4-9 / 10+)",
+                            font=dict(color=TEXT_BLACK)), linecolor=TEXT_BLACK, tickfont=dict(color=TEXT_BLACK)),
+    showlegend=False,
+)
+st.plotly_chart(fig_lag, use_container_width=True)
+corr_lag = lag_data["lobster_prev_year"].corr(lag_data["urchin"])
+avg_by_lobster_tier = lag_data.groupby("lobster_tier", observed=True)["urchin"].mean().reindex(lobster_tier_order)
+st.caption(
+    f"n={len(lag_data)} site-year pairs. Correlation: {corr_lag:+.3f} -- essentially zero. Mean urchin "
+    "count by lobster tier: " + ", ".join(f"{t}={v:.1f}" for t, v in avg_by_lobster_tier.items()) + ". "
+    "No evidence in this pooled data that more lobsters last year predicts fewer urchins this year (the "
+    "biocontrol hypothesis) -- the tiers look flat, not descending. This doesn't rule out a real effect "
+    "(lobster predation on urchins is documented at the individual-animal level), but if it's happening "
+    "at a scale that shows up in site-level RLS counts, this lag comparison isn't detecting it. " + SOURCE_NOTE
+)
+
 # --- Does more canopy mean more fish biodiversity, continuously (not just 2 bins)? ---
 st.subheader("Canopy cover vs. fish species richness (every site-year, not just two bins)")
 biodiv_full = combined.dropna(subset=["canopy_pct", "fish_richness", "fish_biomass"]).copy()
@@ -562,45 +601,6 @@ st.caption(
     "enough to call a real finding on its own; the honest takeaway is that a pooled correlation like "
     "this can't distinguish habitat preference from ecological impact -- it captures where these "
     "species are found, not what they do to a site over time. " + SOURCE_NOTE
-)
-
-# =====================================================================
-# Analysis 5 (bonus): predator (lobster) vs. invasive urchin, with lag
-# =====================================================================
-st.header("Predator check: does last year's lobster count predict this year's urchin count?")
-lag_data = lag.dropna(subset=["lobster_prev_year"]).copy()
-# The raw scatter (1290 overlapping points, both heavily skewed toward
-# small values with a long tail to 126/453) was hard to read -- switched
-# to the same "bin into real-quartile tiers, box plot per tier" pattern
-# used for the canopy-vs-urchin-tier chart, which reads much more
-# clearly for "is there a trend across groups" than a scatter cloud does.
-lobster_tier_order = ["none", "low", "medium", "high"]
-lag_data["lobster_tier"] = pd.cut(
-    lag_data["lobster_prev_year"], bins=[-0.1, 0, 3, 9, lag_data["lobster_prev_year"].max()],
-    labels=lobster_tier_order,
-)
-fig_lag = go.Figure()
-for tier, color in zip(lobster_tier_order, ["#1a9850", "#66c2a5", "#eb6834", "#a50f15"]):
-    d = lag_data[lag_data["lobster_tier"] == tier]
-    fig_lag.add_trace(go.Box(y=d["urchin"], name=tier, marker=dict(color=color), boxmean=True))
-fig_lag.update_layout(
-    height=500, font=dict(color=TEXT_BLACK), plot_bgcolor="#fcfcfb", paper_bgcolor="#fcfcfb",
-    yaxis=dict(title=dict(text="Invasive urchin count, this year", font=dict(color=TEXT_BLACK)),
-                showgrid=True, gridcolor=GRID, linecolor=TEXT_BLACK, tickfont=dict(color=TEXT_BLACK)),
-    xaxis=dict(title=dict(text="Lobster count last year, same site (real quartile tiers: 0 / 1-3 / 4-9 / 10+)",
-                            font=dict(color=TEXT_BLACK)), linecolor=TEXT_BLACK, tickfont=dict(color=TEXT_BLACK)),
-    showlegend=False,
-)
-st.plotly_chart(fig_lag, use_container_width=True)
-corr_lag = lag_data["lobster_prev_year"].corr(lag_data["urchin"])
-avg_by_lobster_tier = lag_data.groupby("lobster_tier", observed=True)["urchin"].mean().reindex(lobster_tier_order)
-st.caption(
-    f"n={len(lag_data)} site-year pairs. Correlation: {corr_lag:+.3f} -- essentially zero. Mean urchin "
-    "count by lobster tier: " + ", ".join(f"{t}={v:.1f}" for t, v in avg_by_lobster_tier.items()) + ". "
-    "No evidence in this pooled data that more lobsters last year predicts fewer urchins this year (the "
-    "biocontrol hypothesis) -- the tiers look flat, not descending. This doesn't rule out a real effect "
-    "(lobster predation on urchins is documented at the individual-animal level), but if it's happening "
-    "at a scale that shows up in site-level RLS counts, this lag comparison isn't detecting it. " + SOURCE_NOTE
 )
 
 # =====================================================================
